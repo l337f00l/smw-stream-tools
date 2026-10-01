@@ -49,19 +49,38 @@ On Windows you can double-click `start.bat`, or build the executable described b
 
 **4. Optional: Twitch and RetroAchievements.** Both have their own sections below.
 
-## Building an executable
+## The executable
+
+Most people who want this don't have Python, so each release carries a prebuilt
+**`SMW Stream Tools.exe`** — a single file that needs nothing installed. Grab it
+from [Releases](../../releases) and skip the setup steps above; the app still
+opens the same settings page in your browser.
+
+Settings go in a `data` folder beside the exe, so they survive updates. Keep
+that folder when you replace the executable.
+
+### Building it yourself
 
 ```
 build.bat
 ```
 
-It installs what it needs, builds, and leaves **`SMW Stream Tools.exe`** in the project folder — a single file needing no Python install. The `build` and `dist` folders are cleaned up afterwards.
-
-Settings go in a `data` folder beside the exe, so they survive updates. Keep that folder when you replace the executable.
+It installs what it needs, builds, and leaves **`SMW Stream Tools.exe`** in the project folder. The `build` and `dist` folders are cleaned up afterwards.
 
 The build is windowed, meaning no console, so if it fails to start there's nowhere for an error to appear — it writes `startup-error.txt` next to the exe instead. If it starts but you get no tray icon, open the settings page: the log says why.
 
 On macOS or Linux, run the same PyInstaller command by hand with `:` instead of `;` in `--add-data`.
+
+### Cutting a release
+
+Pushing a version tag builds the executable on a Windows runner and publishes it:
+
+```
+git tag v1.0.0
+git push origin v1.0.0
+```
+
+The workflow is `.github/workflows/build.yml`. It runs the same PyInstaller command as `build.bat` — if you change one, change the other — and attaches the exe to a release named after the tag. You can also run it by hand from the Actions tab without tagging, which leaves the exe as a downloadable artifact instead.
 
 ## The browser overlay
 

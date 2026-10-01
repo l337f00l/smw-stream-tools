@@ -1,0 +1,86 @@
+name: Build Windows executable
+
+# Most people who want this tool don't have Python, so the executable is what
+# they'll actually download. Building it here means a release always carries
+# one, built the same way every time, rather than whatever was on the
+# maintainer's machine that day.
+
+on:
+  push:
+    tags:
+      - "v*"           # pushing v1.0.0 publishes a release with the exe attached
+  workflow_dispatch:   # or build one by hand from the Actions tab, no tag needed
+
+permissions:
+  contents: write      # required to create the release and upload to it
+
+jobs:
+  build:
+    runs-on: windows-latest
+
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        # requirements.txt first, exactly as build.bat does: pystray and
+        # Pillow have to be present at BUILD time or PyInstaller has nothing
+        # to bundle and the exe silently ends up with no tray icon.
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements.txt
+          python -m pip install pyinstaller
+
+      - name: Check it compiles
+        # Cheap, and catches a syntax error before spending minutes on a
+        # build that could never have worked.
+        run: python -m compileall -q smwtools run.py
+
+      - name: Build
+        # Kept identical to build.bat. If you change one, change the other.
+        run: >
+          python -m PyInstaller --noconfirm --clean --onefile --windowed
+          --name "SMW Stream Tools"
+          --add-data "smwtools/static;smwtools/static"
+          --hidden-import pystray._win32
+          --hidden-import PIL._tkinter_finder
+          run.py
+
+      - name: Confirm the exe exists
+        # PyInstaller can report success and still not produce the file.
+        shell: pwsh
+        run: |
+          $exe = "dist/SMW Stream Tools.exe"
+          if (-not (Test-Path -LiteralPath $exe)) {
+            throw "Build reported success but $exe is missing."
+          }
+          "{0:N1} MB" -f ((Get-Item -LiteralPath $exe).Length / 1MB)
+
+      - name: Upload as a build artifact
+        # So a manual run from the Actions tab still gives you something to
+        # download, even with no tag and no release.
+        uses: actions/upload-artifact@v7
+        with:
+          name: SMW-Stream-Tools-exe
+          path: dist/SMW Stream Tools.exe
+          if-no-files-found: error
+
+      - name: Attach to the release
+        if: startsWith(github.ref, 'refs/tags/')
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $tag = $env:GITHUB_REF_NAME
+          $exe = "dist/SMW Stream Tools.exe"
+          # The release may already exist — created from the GitHub UI, or by
+          # a re-run of this workflow. Upload into it rather than failing.
+          gh release view $tag *> $null
+          if ($LASTEXITCODE -eq 0) {
+            gh release upload $tag $exe --clobber
+          } else {
+            gh release create $tag $exe --title $tag --generate-notes
+          }
