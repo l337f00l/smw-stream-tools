@@ -1,0 +1,476 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>SMW Stream Tools</title>
+<style>
+  :root{
+    --bg:#0f1115; --panel:#161920; --panel2:#1c2029; --edge:#282d38;
+    --text:#eef1f6; --muted:#98a1b2; --dim:#6b7488;
+    --ok:#4ade80; --warn:#fbbf24; --bad:#f87171; --accent:#ffc857;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--text);
+       font:14px/1.5 "Segoe UI",system-ui,-apple-system,sans-serif}
+  header{position:sticky;top:0;z-index:5;background:rgba(15,17,21,.94);
+         backdrop-filter:blur(8px);border-bottom:1px solid var(--edge);
+         padding:14px 20px;display:flex;align-items:center;gap:16px;flex-wrap:wrap}
+  h1{margin:0;font-size:16px;letter-spacing:.02em}
+  h1 span{color:var(--dim);font-weight:400}
+  .pills{display:flex;gap:8px;flex-wrap:wrap;margin-left:auto}
+  .pill{display:flex;align-items:center;gap:6px;padding:4px 10px;
+        background:var(--panel2);border:1px solid var(--edge);border-radius:999px;
+        font-size:12px;white-space:nowrap}
+  .dot{width:8px;height:8px;border-radius:50%;background:var(--dim);flex:0 0 8px}
+  .dot.ok{background:var(--ok)} .dot.warn{background:var(--warn)}
+  .dot.bad{background:var(--bad)}
+  main{max-width:1100px;margin:0 auto;padding:20px;
+       display:grid;grid-template-columns:1fr;gap:16px}
+  @media(min-width:900px){ main{grid-template-columns:360px 1fr} }
+  .card{background:var(--panel);border:1px solid var(--edge);border-radius:12px;
+        padding:16px 18px}
+  .card h2{margin:0 0 12px;font-size:12px;letter-spacing:.1em;
+           text-transform:uppercase;color:var(--muted);font-weight:700}
+  .urlrow{display:flex;gap:8px;align-items:center;margin:10px 0}
+  .urlrow code{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;
+    white-space:nowrap;background:var(--bg);border:1px solid var(--edge);
+    border-radius:8px;padding:8px 10px;font-size:12px;color:var(--text)}
+  .btnlink{display:inline-block;padding:7px 12px;border-radius:8px;
+    border:1px solid var(--edge);background:var(--bg);color:var(--text);
+    text-decoration:none;font-size:13px}
+  .btnlink:hover{border-color:var(--accent)}
+  /* Checkerboard, so a transparent overlay reads as transparent rather than
+     as whatever colour the panel happens to be. */
+  .preview{position:relative;overflow:hidden;border-radius:10px;
+    border:1px solid var(--edge);
+    background-color:#6b7488;
+    background-image:
+      linear-gradient(45deg,#4a5165 25%,transparent 25%,transparent 75%,#4a5165 75%),
+      linear-gradient(45deg,#4a5165 25%,transparent 25%,transparent 75%,#4a5165 75%);
+    background-size:16px 16px;background-position:0 0,8px 8px}
+  .preview iframe{border:0;display:block;transform-origin:top left}
+  .live{display:grid;gap:10px}
+  .live .row{display:flex;justify-content:space-between;align-items:baseline;gap:12px}
+  .live .k{color:var(--muted);font-size:12px}
+  .live .v{font-weight:600;text-align:right;word-break:break-word}
+  .big{font-size:26px;font-variant-numeric:tabular-nums;line-height:1.2}
+  .accent{color:var(--accent)}
+  .out{background:var(--panel2);border:1px solid var(--edge);border-radius:8px;
+       padding:8px 10px;font-family:ui-monospace,Consolas,monospace;font-size:13px;
+       white-space:pre-wrap;min-height:34px;color:var(--text)}
+  .out.empty{color:var(--dim)}
+  .btns{display:flex;gap:8px;flex-wrap:wrap;margin-top:12px}
+  button{background:var(--panel2);color:var(--text);border:1px solid var(--edge);
+         border-radius:8px;padding:7px 12px;font-size:13px;cursor:pointer}
+  button:hover{border-color:#3a4150;background:#222836}
+  button.primary{background:var(--accent);color:#1a1405;border-color:var(--accent);
+                 font-weight:600}
+  button.primary:hover{background:#ffd47a}
+  details{border:1px solid var(--edge);border-radius:10px;background:var(--panel);
+          margin-bottom:12px;overflow:hidden}
+  details>summary{padding:12px 16px;cursor:pointer;font-weight:600;font-size:13px;
+                  list-style:none;display:flex;align-items:center;gap:8px}
+  details>summary::-webkit-details-marker{display:none}
+  details>summary::before{content:"▸";color:var(--dim);transition:transform .15s}
+  details[open]>summary::before{transform:rotate(90deg)}
+  details>summary small{color:var(--dim);font-weight:400;margin-left:auto}
+  .body{padding:4px 16px 16px;border-top:1px solid var(--edge)}
+  .field{display:grid;grid-template-columns:1fr;gap:4px;margin:12px 0}
+  @media(min-width:640px){ .field{grid-template-columns:200px 1fr;
+                                  align-items:center;gap:12px} }
+  label{color:var(--muted);font-size:13px}
+  label .hint{display:block;color:var(--dim);font-size:11px;line-height:1.4}
+  input[type=text],input[type=password],input[type=number],select{
+    width:100%;background:#0d0f14;color:var(--text);border:1px solid var(--edge);
+    border-radius:7px;padding:7px 9px;font:inherit;font-size:13px}
+  input:focus,select:focus{outline:none;border-color:var(--accent)}
+  input[type=checkbox]{width:16px;height:16px;accent-color:var(--accent)}
+  .log{background:#0b0d11;border:1px solid var(--edge);border-radius:8px;
+       padding:10px;height:170px;overflow:auto;font-family:ui-monospace,Consolas,monospace;
+       font-size:12px;color:var(--muted);white-space:pre-wrap}
+  .saved{color:var(--ok);font-size:12px;margin-left:8px;opacity:0;transition:opacity .2s}
+  .saved.show{opacity:1}
+  .note{color:var(--dim);font-size:12px;margin:8px 0 0}
+</style>
+</head>
+<body>
+<header>
+  <h1>SMW Stream Tools <span id="hackName"></span></h1>
+  <div class="pills">
+    <div class="pill"><span class="dot" id="dotObs"></span><span id="txtObs">OBS</span></div>
+    <div class="pill"><span class="dot" id="dotSnes"></span><span id="txtSnes">Console</span></div>
+    <div class="pill"><span class="dot" id="dotTwitch"></span><span id="txtTwitch">Twitch</span></div>
+    <div class="pill"><span class="dot" id="dotRa"></span><span id="txtRa">RetroAchievements</span></div>
+  </div>
+</header>
+
+<main>
+  <div>
+    <div class="card">
+      <h2>Live</h2>
+      <div class="live">
+        <div class="row"><span class="k">Hack</span><span class="v" id="lvHack">—</span></div>
+        <div class="row"><span class="k">Exits</span><span class="v big accent" id="lvExits">—</span></div>
+        <div class="row"><span class="k">Deaths</span><span class="v big" id="lvDeaths">—</span></div>
+        <div class="row"><span class="k">Game mode</span><span class="v" id="lvMode">—</span></div>
+        <div class="row"><span class="k">ROM</span><span class="v" id="lvRom">—</span></div>
+      </div>
+      <div class="btns">
+        <button data-action="deaths_minus">Deaths −1</button>
+        <button data-action="deaths_plus">Deaths +1</button>
+        <button data-action="deaths_reset">Reset deaths</button>
+      </div>
+    </div>
+
+    <div class="card" style="margin-top:16px">
+      <h2 id="outHead">Written to OBS</h2>
+      <div class="live">
+        <div class="row"><span class="k">Name</span></div>
+        <div class="out" id="outName"></div>
+        <div class="row"><span class="k">Exits</span></div>
+        <div class="out" id="outExits"></div>
+        <div class="row"><span class="k">Deaths</span></div>
+        <div class="out" id="outDeaths"></div>
+      </div>
+      <div class="btns">
+        <button data-action="refresh" class="primary">Refresh hack now</button>
+        <button data-action="test_alert">Test achievement alert</button>
+      </div>
+    </div>
+
+    <div class="card" id="ovCard" style="margin-top:16px;display:none">
+      <h2>Browser overlay</h2>
+      <p class="note" style="margin-top:0">OBS text sources are off, so this is
+        what goes on stream. Check it here, then add it as a browser source.</p>
+      <div class="urlrow">
+        <code id="ovUrl"></code>
+        <button id="ovCopy">Copy</button>
+      </div>
+      <div class="preview" id="ovBox"><iframe id="ovFrame" title="overlay preview"></iframe></div>
+      <p class="note">Live — it updates as you change the Browser overlay
+        settings. The checkerboard is showing through where the overlay is
+        transparent.</p>
+      <div class="btns"><a class="btnlink" id="ovOpen" target="_blank" rel="noopener">Open in a tab</a></div>
+    </div>
+
+    <div class="card" style="margin-top:16px">
+      <h2>Log</h2>
+      <div class="log" id="log"></div>
+    </div>
+  </div>
+
+  <div id="settings"></div>
+</main>
+
+<script>
+const FIELDS = [
+  ["Connections", "How this app reaches OBS and your console.", [
+    ["enable_obs", "Write to OBS text sources", "bool", "Turn off if you use the browser overlay, or Meld."],
+    ["obs_url", "OBS WebSocket URL", "text", "Tools → WebSocket Server Settings in OBS."],
+    ["obs_password", "OBS password", "password", "Blank leaves the saved one unchanged."],
+    ["snes_url", "QUsb2Snes URL", "text", "Use port 23074. The old 8080 port is deprecated."],
+    ["snes_device", "Device filter", "text", "Blank uses the first device. Try bizhawk or fxpak when both are connected."],
+    ["enable_snes", "Read from the console", "bool", ""],
+  ]],
+  ["OBS sources", "Which text sources get written. Leave any blank to skip it.", [
+    ["name_source", "Hack name", "source", ""],
+    ["exits_source", "Exits", "source", ""],
+    ["deaths_source", "Deaths", "source", ""],
+    ["author_source", "Author", "source", ""],
+    ["exits_format", "Exits format", "text", "{done} {total} {name} {author} {deaths}"],
+    ["deaths_format", "Deaths format", "text", "{deaths}"],
+    ["author_format", "Author format", "text", "{author}"],
+  ]],
+  ["Twitch and kaizoff", "Reads your stream title to work out which hack you're playing.", [
+    ["enable_twitch", "Match hack from stream title", "bool", ""],
+    ["twitch_channel", "Twitch channel", "text", ""],
+    ["twitch_client_id", "Client ID", "text", "From dev.twitch.tv/console."],
+    ["twitch_client_secret", "Client secret", "password", "Blank leaves the saved one unchanged."],
+    ["title_poll_seconds", "Check title every (s)", "number", ""],
+    ["auto_shorten", "Drop ': Subtitle' from long names", "bool", ""],
+    ["allow_insecure_hacks", "Allow insecure hack-index fetch", "bool", "Only if kaizoff.com's certificate chain is broken. Twitch calls are never downgraded."],
+  ]],
+  ["RetroAchievements", "Optional progress readout and unlock alerts.", [
+    ["enable_ra", "Enable", "bool", ""],
+    ["ra_user", "Username", "text", ""],
+    ["ra_api_key", "Web API key", "password", "Control panel → Keys. Blank leaves the saved one unchanged."],
+    ["ra_source", "Progress text source", "source", ""],
+    ["ra_format", "Progress format", "text", "{earned} {total} {title} {pct}"],
+    ["ra_game_id", "Game ID", "text", "Blank tracks whatever you're playing."],
+    ["ra_hardcore", "Count hardcore unlocks only", "bool", ""],
+    ["ra_alerts_on", "Show unlock alerts", "bool", "Add a browser source pointing at /overlay on this port."],
+    ["ra_alert_poll_s", "Alert check interval (s)", "number", "This is the delay you see on stream."],
+    ["ra_alert_seconds", "Alert duration (s)", "number", ""],
+    ["ra_alert_position", "Alert corner", "select:br=Bottom right,bl=Bottom left,tr=Top right,tl=Top left", ""],
+  ]],
+  ["Browser overlay", "One browser source instead of separate text sources. Works in OBS, Meld and anything else with a browser layer — point it at /counters on this port. The achievements line hides itself when the hack has no set.", [
+    ["ov_show_name", "Show hack name", "bool", ""],
+    ["ov_show_exits", "Show exits", "bool", ""],
+    ["ov_show_deaths", "Show deaths", "bool", ""],
+    ["ov_show_author", "Show author", "bool", ""],
+    ["ov_show_ra", "Show achievements", "bool", "Appears only when the hack actually has a set."],
+    ["ov_layout", "Layout", "select:stack=One per line,inline=Name above, rest on one line", ""],
+    ["ov_align", "Align", "select:left=Left,center=Centre,right=Right", ""],
+    ["ov_font", "Font", "text", "Any font installed on this machine."],
+    ["ov_size", "Font size (px)", "number", "The name shrinks on its own if it would overflow."],
+    ["ov_min_size", "Minimum font size (px)", "number", "Below this a long name wraps instead of shrinking."],
+    ["ov_color", "Text colour", "text", "Hex, e.g. #ffffff."],
+    ["ov_outline", "Outline colour", "text", "Hex. Keeps text legible over gameplay."],
+    ["ov_outline_px", "Outline width (px)", "number", "0 for none."],
+    ["ov_bg", "Background", "text", "transparent, or a hex colour if your software will not composite it."],
+    ["ov_pad", "Background padding (px)", "number", "Only matters with a background colour."],
+    ["ov_width", "Width (px)", "number", "Match your browser source width."],
+    ["ov_gap", "Line spacing (px)", "number", ""],
+  ]],
+  ["Advanced", "Memory addresses and timing. The defaults are what testing settled on.", [
+    ["exit_addr", "Exit counter address", "text", "Hex."],
+    ["death_addr", "Death state address", "text", "Hex. F5009D is the sprite-lock byte."],
+    ["death_value", "Death state value", "text", "Hex. 30 during a death, 04 on a pipe, 00 on a door."],
+    ["gate_addr", "Game mode address", "text", "Hex."],
+    ["gate_min", "Lowest readable mode", "text", "Hex."],
+    ["gate_max", "Highest readable mode", "text", "Hex."],
+    ["arm_modes", "Arm on modes", "text", "Hex, comma separated."],
+    ["arm_after_s", "Arm after N seconds of play", "number", "Fallback for hacks with no overworld."],
+    ["rom_addr", "ROM header address", "text", "Hex. Identifies the hack."],
+    ["poll_ms", "Poll interval (ms)", "number", ""],
+    ["hack_cache_hours", "Refresh hack list every (h)", "number", ""],
+    ["web_port", "Web UI port", "number", "Changing this needs a restart of the app."],
+  ]],
+];
+
+let config = {}, sources = [], dirty = false;
+
+function el(tag, attrs, kids){
+  const n = document.createElement(tag);
+  for (const k in (attrs||{})) {
+    if (k === "class") n.className = attrs[k];
+    else if (k === "text") n.textContent = attrs[k];
+    else n.setAttribute(k, attrs[k]);
+  }
+  (kids||[]).forEach(c => n.appendChild(c));
+  return n;
+}
+
+function input(key, kind){
+  let node;
+  if (kind === "bool") {
+    node = el("input", {type:"checkbox"});
+    node.checked = !!config[key];
+  } else if (kind === "source") {
+    node = el("select");
+    node.appendChild(el("option", {value:"", text:"(none)"}));
+    // A source that is configured but not currently reported by OBS still has
+    // to appear, or it would look as though it had been cleared. Build that
+    // list locally: appending to the shared one made the poll below compare
+    // OBS's list against a list containing extras, never match, and rebuild
+    // the whole page every second — which folded shut any section you opened.
+    const opts = (config[key] && !sources.includes(config[key]))
+               ? sources.concat([config[key]]) : sources;
+    opts.forEach(s => {
+      const o = el("option", {value:s, text:s});
+      if (s === config[key]) o.selected = true;
+      node.appendChild(o);
+    });
+  } else if (kind.startsWith("select:")) {
+    node = el("select");
+    kind.slice(7).split(",").forEach(pair => {
+      const [v, label] = pair.split("=");
+      const o = el("option", {value:v, text:label});
+      if (v === config[key]) o.selected = true;
+      node.appendChild(o);
+    });
+  } else if (kind === "number") {
+    node = el("input", {type:"number"});
+    node.value = config[key];
+  } else if (kind === "password") {
+    node = el("input", {type:"password",
+      placeholder: config[key + "_set"] ? "•••••••• (saved)" : ""});
+    node.value = "";
+  } else {
+    node = el("input", {type:"text"});
+    node.value = config[key] == null ? "" : config[key];
+  }
+  node.dataset.key = key;
+  node.dataset.kind = kind;
+  node.addEventListener("change", () => { dirty = true; });
+  return node;
+}
+
+let rendered = false;
+
+function renderSettings(){
+  const host = document.getElementById("settings");
+  // Carry the open sections across a rebuild. OBS reporting a different set
+  // of sources is a good reason to redraw the dropdowns; it is not a reason
+  // to close the panel someone is reading.
+  const open = new Set();
+  host.querySelectorAll("details[open]").forEach(d => open.add(d.dataset.title));
+  host.textContent = "";
+  FIELDS.forEach(([title, blurb, rows], idx) => {
+    const body = el("div", {class:"body"});
+    rows.forEach(([key, label, kind, hint]) => {
+      const lab = el("label", {text:label});
+      if (hint) lab.appendChild(el("span", {class:"hint", text:hint}));
+      body.appendChild(el("div", {class:"field"}, [lab, input(key, kind)]));
+    });
+    const save = el("button", {class:"primary", text:"Save"});
+    const saved = el("span", {class:"saved", text:"Saved"});
+    save.addEventListener("click", () => saveSettings(saved));
+    body.appendChild(el("div", {class:"btns"}, [save, saved]));
+    if (blurb) body.insertBefore(el("p", {class:"note", text:blurb}), body.firstChild);
+
+    const summary = el("summary", {text:title});
+    // First draw opens the first section; after that, whatever was open stays.
+    const wantOpen = rendered ? open.has(title) : idx === 0;
+    const d = el("details", wantOpen ? {open:"open"} : {}, [summary, body]);
+    d.dataset.title = title;
+    host.appendChild(d);
+  });
+  rendered = true;
+}
+
+async function saveSettings(savedEl){
+  const payload = {};
+  document.querySelectorAll("[data-key]").forEach(node => {
+    const key = node.dataset.key, kind = node.dataset.kind;
+    if (kind === "bool") payload[key] = node.checked;
+    else if (kind === "number") payload[key] = Number(node.value || 0);
+    else payload[key] = node.value;
+  });
+  const r = await fetch("/api/config", {
+    method:"POST", headers:{"Content-Type":"application/json"},
+    body: JSON.stringify(payload)});
+  const data = await r.json();
+  config = data.config; dirty = false;
+  updateOverlayCard();
+  if (savedEl){ savedEl.classList.add("show");
+                setTimeout(()=>savedEl.classList.remove("show"), 1400); }
+}
+
+function dot(id, cls, label){
+  const d = document.getElementById(id);
+  d.className = "dot" + (cls ? " " + cls : "");
+  document.getElementById(id.replace("dot","txt")).textContent = label;
+}
+
+function setOut(id, value){
+  const n = document.getElementById(id);
+  n.textContent = value || "(nothing)";
+  n.className = "out" + (value ? "" : " empty");
+}
+
+
+// -- browser overlay preview ---------------------------------------------
+// Shown when OBS writing is off, because then the overlay IS the output and
+// the first thing anyone wants is to see it before wiring it into a scene.
+function updateOverlayCard(){
+  const card = document.getElementById("ovCard");
+  const show = !config.enable_obs;
+  card.style.display = show ? "" : "none";
+  const heading = document.getElementById("outHead");
+  if (heading) heading.textContent = show ? "Overlay text" : "Written to OBS";
+  if (!show) return;
+
+  const url = location.origin + "/counters";
+  document.getElementById("ovUrl").textContent = url;
+  document.getElementById("ovOpen").href = url;
+  const frame = document.getElementById("ovFrame");
+  // Assign src only once. Reassigning it reloads the page inside, which
+  // restarts its polling and makes the preview flicker every second.
+  if (frame.dataset.src !== url) { frame.dataset.src = url; frame.src = url; }
+  scalePreview();
+}
+
+function scalePreview(){
+  const box = document.getElementById("ovBox");
+  const frame = document.getElementById("ovFrame");
+  if (!box || !box.clientWidth) return;
+  // Render at the real overlay width, then scale the whole thing down to fit
+  // the card — so what you see is the true layout, not a narrower one that
+  // would wrap differently on stream.
+  const w = Number(config.ov_width) || 520;
+  const h = 200;
+  frame.style.width = w + "px";
+  frame.style.height = h + "px";
+  const scale = Math.min(1, box.clientWidth / w);
+  frame.style.transform = "scale(" + scale + ")";
+  box.style.height = Math.round(h * scale) + "px";
+}
+
+document.getElementById("ovCopy").addEventListener("click", async (ev) => {
+  const btn = ev.target;
+  try {
+    await navigator.clipboard.writeText(document.getElementById("ovUrl").textContent);
+    btn.textContent = "Copied";
+  } catch (err) {
+    btn.textContent = "Select it";   // clipboard blocked; say so rather than lie
+  }
+  setTimeout(() => { btn.textContent = "Copy"; }, 1400);
+});
+
+window.addEventListener("resize", scalePreview);
+
+async function poll(){
+  let s;
+  try { s = await (await fetch("/api/state", {cache:"no-store"})).json(); }
+  catch (e) { dot("dotObs","bad","app not running"); return; }
+
+  dot("dotObs", s.obs.connected ? "ok" : "bad",
+      s.obs.connected ? "OBS " + s.obs.version : "OBS: " + s.obs.status);
+  const sn = s.snes || {};
+  dot("dotSnes", sn.connected ? (sn.armed ? "ok" : "warn") : "bad",
+      sn.connected ? "Console: " + sn.status : "Console: not connected");
+  const tw = s.twitch || {};
+  dot("dotTwitch", tw.status === "ok" ? "ok" : (tw.status === "off" ? "" : "warn"),
+      "Twitch: " + (tw.status || "idle"));
+  const ra = s.ra || {};
+  dot("dotRa", ra.status === "ok" ? "ok" : (ra.status === "off" ? "" : "warn"),
+      "RA: " + (ra.status || "off"));
+
+  document.getElementById("hackName").textContent = s.name_text ? "— " + s.name_text : "";
+  document.getElementById("lvHack").textContent = s.hack ? s.hack.name : "—";
+  document.getElementById("lvExits").textContent =
+      s.hack ? ((sn.exits == null ? "—" : sn.exits) + " / " + (s.hack.exits || "?")) : "—";
+  document.getElementById("lvDeaths").textContent = sn.deaths == null ? "—" : sn.deaths;
+  document.getElementById("lvMode").textContent =
+      sn.mode == null ? "—" : ("0x" + sn.mode.toString(16).toUpperCase().padStart(2,"0"));
+  document.getElementById("lvRom").textContent = sn.rom || "—";
+
+  setOut("outName", s.name_text);
+  setOut("outExits", s.exits_text);
+  setOut("outDeaths", s.deaths_text);
+
+  const log = document.getElementById("log");
+  const atBottom = log.scrollTop + log.clientHeight >= log.scrollHeight - 20;
+  log.textContent = (s.log || []).join("\n");
+  if (atBottom) log.scrollTop = log.scrollHeight;
+
+  // Only rebuild the source dropdowns when OBS reports a different set, so
+  // typing in a field isn't interrupted by the poll.
+  const incoming = s.text_sources || [];
+  if (!dirty && incoming.join("|") !== sources.join("|")) {
+    sources = incoming;
+    renderSettings();
+  }
+}
+
+document.addEventListener("click", async (ev) => {
+  const btn = ev.target.closest("[data-action]");
+  if (!btn) return;
+  await fetch("/api/action", {method:"POST",
+    headers:{"Content-Type":"application/json"},
+    body: JSON.stringify({action: btn.dataset.action})});
+  poll();
+});
+
+(async function init(){
+  config = await (await fetch("/api/config")).json();
+  renderSettings();
+  updateOverlayCard();
+  poll();
+  setInterval(poll, 1000);
+})();
+</script>
+</body>
+</html>

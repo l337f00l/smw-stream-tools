@@ -1,0 +1,155 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>RA Alerts</title>
+<style>
+  :root {
+    --card: #15171c;
+    --edge: #2c3038;
+    --text: #f2f4f8;
+    --muted: #a8b0bd;
+    --accent: #ffc857;
+  }
+  * { box-sizing: border-box; }
+  html, body {
+    margin: 0; padding: 0; background: transparent; overflow: hidden;
+    font-family: "Segoe UI", system-ui, -apple-system, sans-serif;
+  }
+  #stage { position: fixed; inset: 0; display: flex; padding: 16px; }
+  #stage.tl { align-items: flex-start; justify-content: flex-start; }
+  #stage.tr { align-items: flex-start; justify-content: flex-end; }
+  #stage.bl { align-items: flex-end;   justify-content: flex-start; }
+  #stage.br { align-items: flex-end;   justify-content: flex-end; }
+
+  .card {
+    display: flex; align-items: center; gap: 14px;
+    max-width: 460px; padding: 14px 18px 14px 14px;
+    background: var(--card);
+    border: 1px solid var(--edge);
+    border-left: 4px solid var(--accent);
+    border-radius: 10px;
+    box-shadow: 0 10px 30px rgba(0,0,0,.45);
+    opacity: 0; transform: translateY(12px) scale(.98);
+    transition: opacity .32s ease, transform .32s cubic-bezier(.2,.8,.3,1);
+  }
+  .card.in { opacity: 1; transform: translateY(0) scale(1); }
+
+  .badge {
+    width: 64px; height: 64px; flex: 0 0 64px;
+    border-radius: 8px; background: #0d0f13;
+    image-rendering: pixelated;
+    border: 1px solid var(--edge);
+  }
+  .body { min-width: 0; }
+  .kicker {
+    font-size: 11px; letter-spacing: .09em; text-transform: uppercase;
+    color: var(--accent); font-weight: 700; margin-bottom: 3px;
+  }
+  .title {
+    font-size: 17px; font-weight: 700; color: var(--text);
+    line-height: 1.25; margin-bottom: 3px;
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  }
+  .desc {
+    font-size: 13px; color: var(--muted); line-height: 1.35;
+    display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical;
+    overflow: hidden;
+  }
+  .meta { font-size: 12px; color: #7e8797; margin-top: 4px; }
+  .pts { color: var(--accent); font-weight: 700; }
+</style>
+</head>
+<body>
+<div id="stage" class="br"></div>
+<script>
+(function () {
+  var stage = document.getElementById("stage");
+  var since = null;
+  var queue = [];
+  var showing = false;
+  var holdMs = 6000;
+
+  function card(ev) {
+    var el = document.createElement("div");
+    el.className = "card";
+    var img = document.createElement("img");
+    img.className = "badge";
+    img.src = ev.badge || "";
+    img.alt = "";
+    img.onerror = function () { img.style.visibility = "hidden"; };
+    var body = document.createElement("div");
+    body.className = "body";
+    function add(cls, text) {
+      if (!text) return;
+      var d = document.createElement("div");
+      d.className = cls;
+      d.textContent = text;
+      body.appendChild(d);
+    }
+    add("kicker", "Achievement unlocked");
+    add("title", ev.title);
+    add("desc", ev.description);
+    if (ev.points || ev.game) {
+      var meta = document.createElement("div");
+      meta.className = "meta";
+      if (ev.points) {
+        var p = document.createElement("span");
+        p.className = "pts";
+        p.textContent = ev.points + (ev.points === 1 ? " point" : " points");
+        meta.appendChild(p);
+      }
+      if (ev.game) {
+        meta.appendChild(document.createTextNode(
+          (ev.points ? "  ·  " : "") + ev.game));
+      }
+      body.appendChild(meta);
+    }
+    el.appendChild(img);
+    el.appendChild(body);
+    return el;
+  }
+
+  function next() {
+    if (showing || !queue.length) return;
+    showing = true;
+    var el = card(queue.shift());
+    stage.appendChild(el);
+    requestAnimationFrame(function () {
+      requestAnimationFrame(function () { el.classList.add("in"); });
+    });
+    setTimeout(function () {
+      el.classList.remove("in");
+      setTimeout(function () {
+        el.remove();
+        showing = false;
+        next();
+      }, 400);
+    }, holdMs);
+  }
+
+  function poll() {
+    var url = "/events" + (since === null ? "" : "?since=" + since);
+    fetch(url, { cache: "no-store" })
+      .then(function (r) { return r.json(); })
+      .then(function (data) {
+        if (typeof data.hold_ms === "number") holdMs = data.hold_ms;
+        if (data.position) stage.className = data.position;
+        var first = since === null;
+        since = data.cursor;
+        // On the first poll we only take the cursor, so reloading the browser
+        // source does not replay everything already unlocked.
+        if (!first && data.events && data.events.length) {
+          data.events.forEach(function (ev) { queue.push(ev); });
+          next();
+        }
+      })
+      .catch(function () { /* server restarting; try again next tick */ });
+  }
+
+  poll();
+  setInterval(poll, 500);
+})();
+</script>
+</body>
+</html>

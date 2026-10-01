@@ -1,0 +1,196 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>SMW Stream Tools — counters</title>
+<style>
+  /* Transparent throughout: this sits over gameplay. */
+  html, body {
+    margin: 0; padding: 0; background: transparent; overflow: hidden;
+    -webkit-font-smoothing: antialiased;
+  }
+  #card {
+    display: flex; flex-direction: column;
+    font-weight: 700; line-height: 1.15;
+    white-space: pre-wrap;           /* honours \n in the format strings */
+  }
+  /* Rows fade rather than pop, because the achievements line appears and
+     disappears on its own when you change hack mid-stream. */
+  .row {
+    transition: opacity .25s ease;
+    opacity: 1;
+  }
+  .row.gone { display: none; }
+  .row.fading { opacity: 0; }
+  /* The name is measured for fitting, so it must be allowed to overflow
+     while being measured — wrapping would hide the overflow the fit loop
+     looks for. JS turns wrapping back on if it won't fit even at minimum. */
+  .row { white-space: nowrap; }
+  .row.wrapped { white-space: pre-wrap; }
+  #line { display: flex; flex-wrap: wrap; }
+  #card.inline #line > .row { margin: 0; }
+  #card.stack #line { flex-direction: column; }
+</style>
+</head>
+<body>
+<div id="card">
+  <div id="name" class="row"></div>
+  <div id="line">
+    <div id="exits" class="row"></div>
+    <div id="deaths" class="row"></div>
+    <div id="ra" class="row"></div>
+  </div>
+  <div id="author" class="row"></div>
+</div>
+
+<script>
+// Poll the same state the settings page uses. A page can decide for itself
+// what to show, which is the whole reason this exists: no scene has to be
+// edited when a hack turns out to have achievements and the last one didn't.
+const card = document.getElementById("card");
+const nodes = {
+  name: document.getElementById("name"),
+  exits: document.getElementById("exits"),
+  deaths: document.getElementById("deaths"),
+  author: document.getElementById("author"),
+  ra: document.getElementById("ra"),
+};
+const line = document.getElementById("line");
+
+let styleKey = null;      // so styling is only reapplied when it changes
+let baseSize = 40, minSize = 22;
+
+function applyStyle(c) {
+  const key = JSON.stringify([c.ov_font, c.ov_size, c.ov_color, c.ov_outline,
+                              c.ov_outline_px, c.ov_align, c.ov_layout, c.ov_min_size,
+                              c.ov_bg, c.ov_pad,
+                              c.ov_gap, c.ov_width]);
+  if (key === styleKey) return;
+  const restyled = styleKey !== null;
+  styleKey = key;
+  baseSize = c.ov_size || 40;
+  minSize = Math.min(c.ov_min_size || 22, baseSize);
+
+  const align = c.ov_align || "left";
+  const flexAlign = align === "center" ? "center"
+                  : align === "right" ? "flex-end" : "flex-start";
+
+  card.className = (c.ov_layout === "inline") ? "inline" : "stack";
+  card.style.fontFamily = c.ov_font || "sans-serif";
+  card.style.fontSize = baseSize + "px";
+  card.style.color = c.ov_color || "#fff";
+  card.style.gap = (c.ov_gap || 0) + "px";
+  card.style.width = (c.ov_width || 520) + "px";
+  // A page background rather than the body's, so a plate only covers
+  // the text and not the whole browser layer.
+  card.style.background = c.ov_bg || "transparent";
+  card.style.padding = (c.ov_pad || 0) + "px";
+  card.style.boxSizing = "content-box";
+  card.style.alignItems = flexAlign;
+  card.style.textAlign = align;
+
+  line.style.gap = (c.ov_layout === "inline")
+      ? Math.max(c.ov_gap || 0, 14) + "px" : (c.ov_gap || 0) + "px";
+  line.style.alignItems = flexAlign;
+  line.style.justifyContent = flexAlign;
+
+  // Outline via shadows rather than -webkit-text-stroke, which thins glyphs
+  // by drawing the stroke inside the letterform.
+  const w = Number(c.ov_outline_px || 0);
+  if (w > 0) {
+    const col = c.ov_outline || "#000";
+    const ring = [];
+    for (let a = 0; a < 360; a += 30) {
+      const r = a * Math.PI / 180;
+      ring.push((Math.cos(r) * w).toFixed(1) + "px " +
+                (Math.sin(r) * w).toFixed(1) + "px 0 " + col);
+    }
+    card.style.textShadow = ring.join(",");
+  } else {
+    card.style.textShadow = "none";
+  }
+  // A size or width change invalidates every previous fit.
+  if (restyled) requestAnimationFrame(fitAll);
+}
+
+// The browser equivalent of the OBS font fitting: shrink the name until it
+// fits the width, rather than letting a long title run off the overlay.
+function fitRow(n) {
+  if (!n.textContent) return;
+  const limit = card.clientWidth;
+  if (!limit) return;
+
+  // Step down from the base size until it fits on one line.
+  n.classList.remove("wrapped");
+  let size = baseSize;
+  n.style.fontSize = size + "px";
+  let guard = 200;
+  while (n.scrollWidth > limit && size > minSize && guard-- > 0) {
+    size -= 1;
+    n.style.fontSize = size + "px";
+  }
+  // Still too wide at the smallest allowed size, so let it wrap rather than
+  // shrink into illegibility — the same order the OBS path settled on.
+  if (n.scrollWidth > limit) n.classList.add("wrapped");
+}
+
+// Every row fits itself, not just the name: people pick a width to suit their
+// scene, and a long achievement title should shrink rather than break across
+// lines mid-phrase.
+function fitAll() {
+  for (const key in nodes) fitRow(nodes[key]);
+}
+
+function setRow(node, text, visible) {
+  const show = visible && !!text;
+  if (node.dataset.shown === String(show) && node.textContent === text) return;
+  if (node.textContent !== text) node.textContent = text;
+  node.dataset.shown = String(show);
+  if (show) {
+    node.classList.remove("gone");
+    requestAnimationFrame(() => node.classList.remove("fading"));
+  } else {
+    node.classList.add("fading");
+    // Let the fade finish before it stops taking up space, so the rest of
+    // the overlay doesn't jump while it's still visible.
+    setTimeout(() => {
+      if (node.dataset.shown === "false") node.classList.add("gone");
+    }, 260);
+  }
+}
+
+async function tick() {
+  let state;
+  try {
+    const res = await fetch("/api/overlay", { cache: "no-store" });
+    state = await res.json();
+  } catch (err) {
+    // The app restarting must not blank the overlay mid-stream: keep
+    // whatever is on screen and try again on the next tick.
+    return;
+  }
+  const c = state.style || {};
+  applyStyle(c);
+
+  const before = Object.keys(nodes).map(k => nodes[k].textContent).join("\u0000");
+  setRow(nodes.name, state.name_text || "", c.ov_show_name);
+  setRow(nodes.exits, state.exits_text || "", c.ov_show_exits);
+  setRow(nodes.deaths, state.deaths_text || "", c.ov_show_deaths);
+  setRow(nodes.author, state.author_text || "", c.ov_show_author);
+
+  // The achievements line is the one that manages itself. ra_available is
+  // false when the hack has no set at all, which is most romhacks, and true
+  // again the moment you load one that does.
+  const raText = state.ra_text || "";
+  setRow(nodes.ra, raText, c.ov_show_ra && state.ra_available);
+
+  const after = Object.keys(nodes).map(k => nodes[k].textContent).join("\u0000");
+  if (after !== before) fitAll();
+}
+
+tick();
+setInterval(tick, 1000);
+window.addEventListener("resize", fitAll);
+</script>
+</body>
+</html>

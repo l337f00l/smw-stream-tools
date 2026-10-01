@@ -1,0 +1,25 @@
+# Settings and saved counts — these hold your API keys and passwords in
+# plain text, so they must never be committed.
+data/
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+
+# PyInstaller
+build/
+dist/
+*.spec
+
+# Built executable and the notes it writes beside itself
+*.exe
+startup-error.txt
+scan-tools.txt
+
+# Editors and OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db

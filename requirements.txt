@@ -1,0 +1,6 @@
+websocket-client>=1.0
+
+# Optional: the system tray icon. Without these the app runs in a console
+# window instead, which works fine.
+pystray>=0.19
+Pillow>=9.0
