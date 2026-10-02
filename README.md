@@ -25,11 +25,25 @@ Deaths come from SMW's sprite-lock byte, which holds a distinct value for about 
 | **Streaming software** | OBS 28 or later, or [Meld Studio](https://meldstudio.co) — anything with a browser source works |
 | **Python** | 3.8 or later, unless you use the executable |
 | **QUsb2Snes** | [QUsb2Snes](https://skarsnik.github.io/QUsb2snes/), for the exit and death counters |
+| **RA2Snes** | [RA2Snes](https://github.com/Factor-64/RA2Snes), for Retro Achievements |
 | **Hardware or emulator** | FXPak Pro / sd2snes over USB, or BizHawk / snes9x-rr / RetroArch |
 
 Nothing else is required. The console side is optional, and so are Twitch and RetroAchievements — each part works without the others. obs-websocket is needed only if you write to OBS text sources; the browser overlay doesn't use it.
 
 ## Setup
+
+## The executable
+
+Most people who want this don't have Python, so each release carries a prebuilt
+**`SMW Stream Tools.exe`** — a single file that needs nothing installed. Grab it
+from [Releases](../../releases) and skip the setup steps below; the app still
+opens the same settings page in your browser.
+
+Settings go in a `data` folder beside the exe, so they survive updates. Keep
+that folder when you replace the executable.
+
+
+If you want to build from source instead of just running the executable then follow the steps below.
 
 **1. Install the one dependency and start the app.**
 
@@ -49,16 +63,6 @@ On Windows you can double-click `start.bat`, or build the executable described b
 
 **4. Optional: Twitch and RetroAchievements.** Both have their own sections below.
 
-## The executable
-
-Most people who want this don't have Python, so each release carries a prebuilt
-**`SMW Stream Tools.exe`** — a single file that needs nothing installed. Grab it
-from [Releases](../../releases) and skip the setup steps above; the app still
-opens the same settings page in your browser.
-
-Settings go in a `data` folder beside the exe, so they survive updates. Keep
-that folder when you replace the executable.
-
 ### Building it yourself
 
 ```
@@ -70,17 +74,6 @@ It installs what it needs, builds, and leaves **`SMW Stream Tools.exe`** in the 
 The build is windowed, meaning no console, so if it fails to start there's nowhere for an error to appear — it writes `startup-error.txt` next to the exe instead. If it starts but you get no tray icon, open the settings page: the log says why.
 
 On macOS or Linux, run the same PyInstaller command by hand with `:` instead of `;` in `--add-data`.
-
-### Cutting a release
-
-Pushing a version tag builds the executable on a Windows runner and publishes it:
-
-```
-git tag v1.0.0
-git push origin v1.0.0
-```
-
-The workflow is `.github/workflows/build.yml`. It runs the same PyInstaller command as `build.bat` — if you change one, change the other — and attaches the exe to a release named after the tag. You can also run it by hand from the Actions tab without tagging, which leaves the exe as a downloadable artifact instead.
 
 ## The browser overlay
 
@@ -132,8 +125,6 @@ The achievement **unlock alert** at `/overlay` is separate and unaffected — it
 
 Meld works, through the browser overlay. There is nothing else to install and no bridge to run.
 
-Meld doesn't speak obs-websocket — it has [its own API](https://github.com/MeldStudio/streamdeck/blob/main/WebChannelAPI.md), and that API can set a layer's name, position and visibility but has no way to set the **text** of a layer. So the text-source route is closed, and the browser overlay is the way in.
-
 **1. Turn off the OBS side.** In Connections, untick **Write to OBS text sources**. Otherwise the app spends the whole stream retrying a connection that will never exist, and shows red in the tray for a problem you don't have.
 
 **2. Check the overlay.** A **Browser overlay** card appears on the dashboard with a live preview and the URL. Get it looking right there first — it renders the same in Meld as it does in the preview.
@@ -146,19 +137,12 @@ http://127.0.0.1:4599/counters
 
 **4. Size and place it.** Resize the layer to suit your scene, and set **Width** in the Browser overlay settings to match — that width is what the text fits itself to. Leave the layer non-interactive; the pointer icon is for pages you click on, and this one you only look at.
 
-**5. For achievement alerts,** tick **Show unlock alerts** under RetroAchievements, then add a second Browser layer pointing at the URL the dashboard shows — `/overlay`, around 900×300.
+**5. For achievement alerts,** tick **Show unlock alerts** under RetroAchievements, then add a second Browser layer pointing at the URL the dashboard shows — 
 
-### If the background isn't transparent
-
-The overlay page is transparent by design, which is what you want over gameplay. OBS composites that correctly. Meld's documentation doesn't say either way, so if you end up with a white or black box behind the text, set **Background** in the Browser overlay settings to a hex colour and give it some **Background padding** — you get a deliberate plate behind the text instead of an accidental one.
-
-If it *is* transparent, leave Background as `transparent` and there's nothing to do.
-
-### What you give up
-
-Nothing that matters. Exits, deaths, the hack name, the author line and achievements all work, because none of them need OBS — they're read from the console, Twitch and RetroAchievements, and rendered by the page.
-
-The only OBS-specific features are the text-source ones: **Exits placement** and the font-fitting settings under Fitting long names. The overlay does its own layout and fitting in CSS, so they have no Meld equivalent and don't need one.
+```
+http://127.0.0.1:4599/overlay
+````
+set it around 900×300.
 
 ## Twitch: where the hack name comes from
 
@@ -185,7 +169,7 @@ Paste both into the app's Twitch section along with your channel name (just the 
 
 ### Making titles match
 
-The matcher looks for a hack name inside your title, so `Kaizo Mario — Grand Poo World 3 — !commands` works fine. Two things to know:
+The matcher looks for a hack name inside your title, so `Kaizo Mario — Grand Poo World 2 — !commands` works fine. Two things to know:
 
 - If nothing matches, the log says so, and the app deliberately shows nothing rather than guessing. Sequels are the usual cause — it refuses `Grand Poo World 3` rather than falling back to `Grand Poo World`, because showing the wrong exit total is worse than showing none.
 - Anything it can't work out on its own goes in `data/overrides.json`, described under Overrides below.
@@ -220,7 +204,6 @@ The console is what resolves this: it reports the moment the ROM changes, which 
 This app only *reads* retroachievements.org. It doesn't detect unlocks itself, so something else has to be earning them:
 
 - **On an emulator** — RetroArch or RALibretro with RetroAchievements enabled.
-- **On real hardware** — [RA2Snes](https://github.com/Factor-64/RA2Snes), which bridges QUsb2Snes to RetroAchievements. See the next section; it runs happily alongside this app.
 
 If nothing is awarding achievements, the readout will correctly show that you have none.
 
