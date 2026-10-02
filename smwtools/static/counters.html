@@ -35,12 +35,14 @@
 <body>
 <div id="card">
   <div id="name" class="row"></div>
+  <!-- Directly under the name: the author belongs with the title it credits,
+       not stranded below the counters. -->
+  <div id="author" class="row"></div>
   <div id="line">
     <div id="exits" class="row"></div>
     <div id="deaths" class="row"></div>
     <div id="ra" class="row"></div>
   </div>
-  <div id="author" class="row"></div>
 </div>
 
 <script>
@@ -59,10 +61,16 @@ const line = document.getElementById("line");
 
 let styleKey = null;      // so styling is only reapplied when it changes
 let baseSize = 40, minSize = 22;
+// Per-row starting size. Each row fits itself from its own size rather than
+// one size for the whole block, so the hack name can be larger than the
+// counters under it.
+let rowSize = {};
 
 function applyStyle(c) {
   const key = JSON.stringify([c.ov_font, c.ov_size, c.ov_color, c.ov_outline,
                               c.ov_outline_px, c.ov_align, c.ov_layout, c.ov_min_size,
+                              c.ov_size_name, c.ov_size_exits, c.ov_size_deaths,
+                              c.ov_size_author, c.ov_size_ra,
                               c.ov_bg, c.ov_pad,
                               c.ov_gap, c.ov_width]);
   if (key === styleKey) return;
@@ -70,6 +78,15 @@ function applyStyle(c) {
   styleKey = key;
   baseSize = c.ov_size || 40;
   minSize = Math.min(c.ov_min_size || 22, baseSize);
+  // 0 (or blank) means "use the overall size", so only the lines you want
+  // different need a value.
+  rowSize = {
+    name: Number(c.ov_size_name) || baseSize,
+    exits: Number(c.ov_size_exits) || baseSize,
+    deaths: Number(c.ov_size_deaths) || baseSize,
+    author: Number(c.ov_size_author) || baseSize,
+    ra: Number(c.ov_size_ra) || baseSize,
+  };
 
   const align = c.ov_align || "left";
   const flexAlign = align === "center" ? "center"
@@ -120,12 +137,16 @@ function fitRow(n) {
   const limit = card.clientWidth;
   if (!limit) return;
 
-  // Step down from the base size until it fits on one line.
+  // Step down from this row's own size until it fits on one line.
   n.classList.remove("wrapped");
-  let size = baseSize;
+  const start = rowSize[n.id] || baseSize;
+  // A row set smaller than the minimum is a deliberate choice, so never grow
+  // it back up to the minimum — that floor is for automatic shrinking.
+  const floor = Math.min(minSize, start);
+  let size = start;
   n.style.fontSize = size + "px";
   let guard = 200;
-  while (n.scrollWidth > limit && size > minSize && guard-- > 0) {
+  while (n.scrollWidth > limit && size > floor && guard-- > 0) {
     size -= 1;
     n.style.fontSize = size + "px";
   }

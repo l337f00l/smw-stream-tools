@@ -93,6 +93,13 @@ DEFAULTS = {
     "ov_font": "Inter, Segoe UI, sans-serif",
     "ov_size": 40,
     "ov_min_size": 22,
+    # Per-line size overrides. 0 means "use Font size", so nobody has to
+    # fill in five boxes to change one line.
+    "ov_size_name": 0,
+    "ov_size_exits": 0,
+    "ov_size_deaths": 0,
+    "ov_size_author": 0,
+    "ov_size_ra": 0,
     "ov_color": "#ffffff",
     "ov_outline": "#000000",
     "ov_outline_px": 3,

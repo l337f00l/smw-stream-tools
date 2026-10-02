@@ -31,20 +31,7 @@ Nothing else is required. The console side is optional, and so are Twitch and Re
 
 ## Setup
 
-## The executable
-
-Most people who want this don't have Python, so each release carries a prebuilt
-**`SMW Stream Tools.exe`** — a single file that needs nothing installed. Grab it
-from [Releases](../../releases) and skip the setup steps below; the app still
-opens the same settings page in your browser.
-
-Settings go in a `data` folder beside the exe, so they survive updates. Keep
-that folder when you replace the executable.
-
-
 **1. Install the one dependency and start the app.**
-
-If you want to build the app yourself extract the Source Code zip file from [Releases](../../releases) and follow the guide below
 
 ```
 pip install -r requirements.txt
@@ -62,7 +49,17 @@ On Windows you can double-click `start.bat`, or build the executable described b
 
 **4. Optional: Twitch and RetroAchievements.** Both have their own sections below.
 
-### Building the Exe yourself
+## The executable
+
+Most people who want this don't have Python, so each release carries a prebuilt
+**`SMW Stream Tools.exe`** — a single file that needs nothing installed. Grab it
+from [Releases](../../releases) and skip the setup steps above; the app still
+opens the same settings page in your browser.
+
+Settings go in a `data` folder beside the exe, so they survive updates. Keep
+that folder when you replace the executable.
+
+### Building it yourself
 
 ```
 build.bat
@@ -73,6 +70,17 @@ It installs what it needs, builds, and leaves **`SMW Stream Tools.exe`** in the 
 The build is windowed, meaning no console, so if it fails to start there's nowhere for an error to appear — it writes `startup-error.txt` next to the exe instead. If it starts but you get no tray icon, open the settings page: the log says why.
 
 On macOS or Linux, run the same PyInstaller command by hand with `:` instead of `;` in `--add-data`.
+
+### Cutting a release
+
+Pushing a version tag builds the executable on a Windows runner and publishes it:
+
+```
+git tag v1.0.0
+git push origin v1.0.0
+```
+
+The workflow is `.github/workflows/build.yml`. It runs the same PyInstaller command as `build.bat` — if you change one, change the other — and attaches the exe to a release named after the tag. You can also run it by hand from the Actions tab without tagging, which leaves the exe as a downloadable artifact instead.
 
 ## The browser overlay
 
@@ -108,6 +116,10 @@ Add a browser source, set the URL above, and size it to match **Width** in the s
 
 The **Browser overlay** section of the settings page controls which rows appear and how they look: font, size, colour, outline, alignment, and whether everything stacks or the counters share one line under the name. The text itself uses the same format strings as the OBS sources, so `Exits {done}/{total}` and friends work exactly as they do there.
 
+**Each line can have its own size.** **Font size** sets the whole block, and the per-line boxes below it — hack name, exits, deaths, achievements, author — override it individually. Leave one at `0` to use the block size, so making just the hack name bigger means filling in one box, not five.
+
+The author line is off by default and sits directly under the hack name, since that is what it credits. Ticking **Show author** both displays it and starts fetching it from kaizoff, which costs one extra request per hack.
+
 Long names shrink to fit the width on their own, and wrap only if they'd fall below **Minimum font size** — the same order the OBS path uses, but done natively by the browser, so it needs no round trips and no font files.
 
 ### Using it alongside text sources
@@ -134,7 +146,7 @@ http://127.0.0.1:4599/counters
 
 **4. Size and place it.** Resize the layer to suit your scene, and set **Width** in the Browser overlay settings to match — that width is what the text fits itself to. Leave the layer non-interactive; the pointer icon is for pages you click on, and this one you only look at.
 
-**5. For achievement alerts,** add a second Browser layer pointing at `/overlay`, around 900×300.
+**5. For achievement alerts,** tick **Show unlock alerts** under RetroAchievements, then add a second Browser layer pointing at the URL the dashboard shows — `/overlay`, around 900×300.
 
 ### If the background isn't transparent
 
@@ -186,7 +198,7 @@ The Client Secret is stored in `data/config.json` in plain text, the same way OB
 
 Optional, and worth understanding before you wire it up.
 
-**Most romhacks do not have achievement sets.** RetroAchievements sets are made by hand, and the overwhelming majority of them are for retail games. A handful of hacks have them — [Quickie World](https://retroachievements.org/game/8476) is one — but for most of what a kaizo players play, there is simply nothing to show.
+**Most romhacks do not have achievement sets.** RetroAchievements sets are made by hand, and the overwhelming majority of them are for retail games. A handful of hacks have them — [Quickie World](https://retroachievements.org/game/8476) is one — but for most of what a kaizo stream plays, there is simply nothing to show.
 
 So if you turn this on and the text source stays empty, **nothing is broken**. It means the hack you're playing has no set.
 
@@ -195,9 +207,9 @@ If you use the browser overlay described below, this handles itself — the achi
 ### What you need
 
 1. Your **RetroAchievements username**.
-2. A **Web API key**, from your [Settings](https://retroachievements.org/settings) — click on [Applications](https://retroachievements.org/settings?tab=applications) and copy the web API key. It is not your password, but treat it like one.
+2. A **Web API key**, from your [control panel](https://retroachievements.org/controlpanel.php) — find the **Keys** section and copy the web API key. It is not your password, but treat it like one.
 
-Paste the key into the RetroAchievements Web API section and save. Leave **Game ID** blank to follow whatever you're currently playing, or set it to pin one game.
+Paste both into the RetroAchievements section and save. Leave **Game ID** blank to follow whatever you're currently playing, or set it to pin one game.
 
 **How "follow whatever you're playing" knows when you switch.** It asks RetroAchievements what you played most recently — and RA only knows about games it recognises. Load a hack with no achievement set and RA never hears about it, so on its own it would keep reporting the *previous* hack indefinitely.
 
@@ -214,7 +226,7 @@ If nothing is awarding achievements, the readout will correctly show that you ha
 
 ### The unlock overlay
 
-With **Show unlock alerts** ticked, add a Browser source in OBS pointing at:
+With **Show unlock alerts** ticked, an **Achievement alerts** card appears on the dashboard with the URL and a copy button. Add a browser source pointing at it:
 
 ```
 http://127.0.0.1:4599/overlay

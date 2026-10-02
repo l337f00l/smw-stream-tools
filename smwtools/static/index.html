@@ -154,6 +154,20 @@
       <div class="btns"><a class="btnlink" id="ovOpen" target="_blank" rel="noopener">Open in a tab</a></div>
     </div>
 
+    <div class="card" id="alertCard" style="margin-top:16px;display:none">
+      <h2>Achievement alerts</h2>
+      <p class="note" style="margin-top:0">A separate browser source that pops a
+        card when you unlock something. Around 900&times;300.</p>
+      <div class="urlrow">
+        <code id="alertUrl"></code>
+        <button id="alertCopy">Copy</button>
+      </div>
+      <div class="btns">
+        <a class="btnlink" id="alertOpen" target="_blank" rel="noopener">Open in a tab</a>
+        <button data-action="test_alert">Send a test alert</button>
+      </div>
+    </div>
+
     <div class="card" style="margin-top:16px">
       <h2>Log</h2>
       <div class="log" id="log"></div>
@@ -215,6 +229,11 @@ const FIELDS = [
     ["ov_font", "Font", "text", "Any font installed on this machine."],
     ["ov_size", "Font size (px)", "number", "The name shrinks on its own if it would overflow."],
     ["ov_min_size", "Minimum font size (px)", "number", "Below this a long name wraps instead of shrinking."],
+    ["ov_size_name", "Hack name size (px)", "number", "0 uses Font size above."],
+    ["ov_size_exits", "Exits size (px)", "number", "0 uses Font size above."],
+    ["ov_size_deaths", "Deaths size (px)", "number", "0 uses Font size above."],
+    ["ov_size_ra", "Achievements size (px)", "number", "0 uses Font size above."],
+    ["ov_size_author", "Author size (px)", "number", "0 uses Font size above."],
     ["ov_color", "Text colour", "text", "Hex, e.g. #ffffff."],
     ["ov_outline", "Outline colour", "text", "Hex. Keeps text legible over gameplay."],
     ["ov_outline_px", "Outline width (px)", "number", "0 for none."],
@@ -344,6 +363,7 @@ async function saveSettings(savedEl){
   const data = await r.json();
   config = data.config; dirty = false;
   updateOverlayCard();
+  updateAlertCard();
   if (savedEl){ savedEl.classList.add("show");
                 setTimeout(()=>savedEl.classList.remove("show"), 1400); }
 }
@@ -382,6 +402,18 @@ function updateOverlayCard(){
   scalePreview();
 }
 
+function updateAlertCard(){
+  const card = document.getElementById("alertCard");
+  // Tied to the alerts setting, not to OBS: the alert overlay is its own
+  // browser source either way.
+  const show = !!(config.enable_ra && config.ra_alerts_on);
+  card.style.display = show ? "" : "none";
+  if (!show) return;
+  const url = location.origin + "/overlay";
+  document.getElementById("alertUrl").textContent = url;
+  document.getElementById("alertOpen").href = url;
+}
+
 function scalePreview(){
   const box = document.getElementById("ovBox");
   const frame = document.getElementById("ovFrame");
@@ -398,16 +430,20 @@ function scalePreview(){
   box.style.height = Math.round(h * scale) + "px";
 }
 
-document.getElementById("ovCopy").addEventListener("click", async (ev) => {
-  const btn = ev.target;
-  try {
-    await navigator.clipboard.writeText(document.getElementById("ovUrl").textContent);
-    btn.textContent = "Copied";
-  } catch (err) {
-    btn.textContent = "Select it";   // clipboard blocked; say so rather than lie
-  }
-  setTimeout(() => { btn.textContent = "Copy"; }, 1400);
-});
+function wireCopy(buttonId, codeId) {
+  document.getElementById(buttonId).addEventListener("click", async (ev) => {
+    const btn = ev.currentTarget;
+    try {
+      await navigator.clipboard.writeText(document.getElementById(codeId).textContent);
+      btn.textContent = "Copied";
+    } catch (err) {
+      btn.textContent = "Select it";  // clipboard blocked; say so rather than lie
+    }
+    setTimeout(() => { btn.textContent = "Copy"; }, 1400);
+  });
+}
+wireCopy("ovCopy", "ovUrl");
+wireCopy("alertCopy", "alertUrl");
 
 window.addEventListener("resize", scalePreview);
 
@@ -468,6 +504,7 @@ document.addEventListener("click", async (ev) => {
   config = await (await fetch("/api/config")).json();
   renderSettings();
   updateOverlayCard();
+  updateAlertCard();
   poll();
   setInterval(poll, 1000);
 })();

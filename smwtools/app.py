@@ -162,6 +162,19 @@ class App(object):
         except (KeyError, IndexError, ValueError):
             return "Deaths: %d" % deaths
 
+    def _wants_author(self):
+        """Is the author going to be shown anywhere?
+
+        It costs an extra request to kaizoff, so it is only fetched when
+        something will display it. Every way of displaying it has to be listed
+        here — the browser overlay was missing, so ticking its author row
+        showed nothing at all for anyone not also writing to an OBS source.
+        """
+        cfg = self.config
+        return bool(cfg["author_source"]
+                    or cfg["ov_show_author"]
+                    or "{author" in (cfg["exits_format"] or ""))
+
     def compose_author(self):
         hack = self.state.get("hack")
         author = (hack or {}).get("author", "")
@@ -298,7 +311,7 @@ class App(object):
         if current and current["name"] == hack["name"]:
             return
         author = ""
-        if cfg["author_source"] or "{author" in (cfg["exits_format"] or ""):
+        if self._wants_author():
             author = self.kaizoff.fetch_authors(hack.get("id"),
                                                 cfg["allow_insecure_hacks"])
         display = self.kaizoff.display_name(hack)
@@ -390,6 +403,17 @@ class App(object):
         if self.retro and moved(RA_KEYS):
             self.retro.stop()
             self.retro.start()
+        # Turning on anything that shows the author has to fetch it now. It is
+        # otherwise only looked up when the hack changes, so ticking the box
+        # mid-stream would leave the line blank until the next hack.
+        hack = self.state.get("hack")
+        if hack and self._wants_author() and not hack.get("author"):
+            author = self.kaizoff.fetch_authors(
+                hack.get("id"), self.config["allow_insecure_hacks"])
+            if author:
+                self.set_state(None, hack=dict(hack, author=author))
+                self.log("author: %s" % author)
+
         # Source names and formats may have changed even when nothing restarted.
         self._last_written.clear()
         self._fitted_for = None
