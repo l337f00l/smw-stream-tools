@@ -33,6 +33,14 @@ DEFAULTS = {
     "obs_url": "ws://127.0.0.1:4455",
     "obs_password": "",
 
+    # Manual hack override. Exits and deaths always come from the console;
+    # only the name and the total have to be told to us, and the index cannot
+    # know about every hack — nor does everyone want to register a Twitch app.
+    "manual_on": False,
+    "manual_name": "",
+    "manual_exits": 0,
+    "manual_author": "",
+
     # Twitch / kaizoff
     "twitch_channel": "",
     "twitch_client_id": "",

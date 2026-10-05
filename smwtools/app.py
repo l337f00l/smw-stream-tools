@@ -30,6 +30,7 @@ SNES_KEYS = ("snes_url", "snes_device", "exit_addr", "gate_addr", "gate_min",
              "death_value", "poll_ms", "rom_addr", "enable_snes")
 RA_KEYS = ("ra_user", "ra_api_key", "ra_game_id", "ra_hardcore", "enable_ra",
            "ra_progress_poll_s", "ra_alerts_on", "ra_alert_poll_s")
+MANUAL_KEYS = ("manual_on", "manual_name", "manual_exits", "manual_author")
 
 
 class App(object):
@@ -281,6 +282,12 @@ class App(object):
         last_title = None
         while self._run:
             cfg = self.config
+            if self._manual_active():
+                # Nothing to look up: the name and total were typed in. Don't
+                # spend API calls on a title whose answer would be discarded.
+                self.set_state("twitch", status="off (manual hack)")
+                time.sleep(2)
+                continue
             if not (cfg["enable_twitch"] and cfg["twitch_channel"]
                     and cfg["twitch_client_id"] and cfg["twitch_client_secret"]):
                 self.set_state("twitch", status="off")
@@ -298,8 +305,48 @@ class App(object):
                 self.set_state("twitch", status="error: %s" % exc)
             self._sleep(max(cfg["title_poll_seconds"], 15))
 
+    def _manual_active(self):
+        """Is the typed-in hack actually overriding anything?
+
+        Ticked but with the name left blank is not an override — it would
+        otherwise freeze whatever was last shown, which is the least
+        predictable thing it could do.
+        """
+        return bool(self.config["manual_on"]
+                    and (self.config["manual_name"] or "").strip())
+
+    def _apply_manual(self):
+        """Use the hack name and exit total typed into the settings page.
+
+        Exits and deaths are read from the console and are not affected by any
+        of this — the console is the only thing that knows them. What the index
+        supplies is the name and the total, and it cannot know about every
+        hack. This is the way out for an unlisted hack, a title the matcher
+        refuses, or anyone who would rather not register a Twitch app at all.
+        """
+        cfg = self.config
+        name = (cfg["manual_name"] or "").strip()
+        if not name:
+            return False
+        total = max(0, int(cfg["manual_exits"] or 0))
+        current = self.state.get("hack") or {}
+        author = (cfg["manual_author"] or "").strip()
+        if (current.get("name") == name and current.get("exits") == total
+                and current.get("author", "") == author):
+            return True            # already showing this; don't churn the overlay
+        self.set_state(None, hack={
+            "name": name, "display": name, "exits": total, "author": author,
+            "difficulty": "", "type": "", "id": None, "manual": True,
+        })
+        self.log("manual hack: %s (%s exits)%s"
+                 % (name, total, " by %s" % author if author else ""))
+        self.request_render()
+        return True
+
     def _apply_title(self, title):
         cfg = self.config
+        if self._manual_active():
+            return                 # the typed-in hack wins
         hacks = self.kaizoff.hacks or self.kaizoff.fetch_hacks(
             cfg["hack_cache_hours"], cfg["allow_insecure_hacks"])
         hack, reason = kz.match_hack(title, hacks, self.kaizoff.overrides, self.log)
@@ -356,6 +403,8 @@ class App(object):
 
     def start(self):
         self._run = True
+        if self._manual_active():
+            self._apply_manual()
         for target in (self._obs_loop, self._render_loop, self._twitch_loop):
             thread = threading.Thread(target=target, daemon=True)
             thread.start()
@@ -403,11 +452,27 @@ class App(object):
         if self.retro and moved(RA_KEYS):
             self.retro.stop()
             self.retro.start()
+        if moved(MANUAL_KEYS):
+            if self._manual_active():
+                self._apply_manual()
+            else:
+                # Back to the index: drop the typed-in hack and re-match the
+                # last title, rather than leaving it on screen until the title
+                # happens to change.
+                if (self.state.get("hack") or {}).get("manual"):
+                    self.set_state(None, hack=None)
+                title = self.state["twitch"].get("title")
+                if title:
+                    self._apply_title(title)
+
         # Turning on anything that shows the author has to fetch it now. It is
         # otherwise only looked up when the hack changes, so ticking the box
         # mid-stream would leave the line blank until the next hack.
+        # A manual hack has no index entry to look an author up in — whatever
+        # was typed is all there is.
         hack = self.state.get("hack")
-        if hack and self._wants_author() and not hack.get("author"):
+        if (hack and not hack.get("manual") and hack.get("id")
+                and self._wants_author() and not hack.get("author")):
             author = self.kaizoff.fetch_authors(
                 hack.get("id"), self.config["allow_insecure_hacks"])
             if author:

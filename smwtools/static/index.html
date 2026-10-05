@@ -196,6 +196,12 @@ const FIELDS = [
     ["deaths_format", "Deaths format", "text", "{deaths}"],
     ["author_format", "Author format", "text", "{author}"],
   ]],
+  ["Manual hack", "Type the hack name and its exit total yourself, for a hack the index doesn't list or if you'd rather not set up Twitch at all. Exits and deaths still come from the console.", [
+    ["manual_on", "Use the hack below", "bool", "Overrides whatever the Twitch title would have matched."],
+    ["manual_name", "Hack name", "text", "Shown exactly as you type it."],
+    ["manual_exits", "Total exits", "number", "The number after the slash, e.g. the 96 in 03/96."],
+    ["manual_author", "Author", "text", "Optional."],
+  ]],
   ["Twitch and kaizoff", "Reads your stream title to work out which hack you're playing.", [
     ["enable_twitch", "Match hack from stream title", "bool", ""],
     ["twitch_channel", "Twitch channel", "text", ""],
