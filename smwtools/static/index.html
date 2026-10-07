@@ -154,6 +154,32 @@
       <div class="btns"><a class="btnlink" id="ovOpen" target="_blank" rel="noopener">Open in a tab</a></div>
     </div>
 
+    <div class="card" id="scanCard" style="margin-top:16px">
+      <h2>Find an address</h2>
+      <div id="scanIdle">
+        <p class="note" style="margin-top:0">If deaths are being missed, or the
+          exit count never moves, this hack keeps its numbers somewhere other
+          than the usual place. Find out where — no typing, just play and
+          press a button.</p>
+        <div class="btns">
+          <button data-scan="deaths">Find the death counter</button>
+          <button data-scan="exits">Find the exit counter</button>
+        </div>
+        <p class="note" id="scanNeedConsole" style="display:none">Connect your
+          console first — this reads its memory.</p>
+      </div>
+      <div id="scanRun" style="display:none">
+        <p class="note" style="margin-top:0" id="scanLead"></p>
+        <p id="scanMsg" style="margin:10px 0;font-size:13px"></p>
+        <p class="note" id="scanErr" style="color:var(--bad);display:none"></p>
+        <div id="scanList" class="live" style="margin:10px 0"></div>
+        <div class="btns">
+          <button class="primary" id="scanStep"></button>
+          <button id="scanCancel">Done</button>
+        </div>
+      </div>
+    </div>
+
     <div class="card" id="alertCard" style="margin-top:16px;display:none">
       <h2>Achievement alerts</h2>
       <p class="note" style="margin-top:0">A separate browser source that pops a
@@ -250,8 +276,9 @@ const FIELDS = [
   ]],
   ["Advanced", "Memory addresses and timing. The defaults are what testing settled on.", [
     ["exit_addr", "Exit counter address", "text", "Hex."],
-    ["death_addr", "Death state address", "text", "Hex. F5009D is the sprite-lock byte."],
-    ["death_value", "Death state value", "text", "Hex. 30 during a death, 04 on a pipe, 00 on a door."],
+    ["death_mode", "Death detection", "select:state=A byte that means \"dying\",counter=A total the hack keeps", "Switch to counter if deaths are being missed — see the README."],
+    ["death_addr", "Death address", "text", "Hex. F5009D is the sprite-lock byte; a counter address comes from find-death-counter."],
+    ["death_value", "Death state value", "text", "Hex. 30 during a death, 04 on a pipe, 00 on a door. Not used in counter mode."],
     ["gate_addr", "Game mode address", "text", "Hex."],
     ["gate_min", "Lowest readable mode", "text", "Hex."],
     ["gate_max", "Highest readable mode", "text", "Hex."],
@@ -420,6 +447,63 @@ function updateAlertCard(){
   document.getElementById("alertOpen").href = url;
 }
 
+// -- address finder -------------------------------------------------------
+let scanState = {running:false};
+
+async function scanPost(body){
+  const res = await fetch("/api/scan", {method:"POST",
+    headers:{"Content-Type":"application/json"}, body:JSON.stringify(body)});
+  const data = await res.json();
+  if (data.scan) { scanState = data.scan; renderScan(); }
+  if (data.config) config = data.config;
+  if (!data.ok && data.error) {
+    scanState.error = data.error; renderScan();
+  }
+  return data;
+}
+
+function renderScan(){
+  const idle = document.getElementById("scanIdle");
+  const run = document.getElementById("scanRun");
+  const s = scanState || {};
+  idle.style.display = s.running ? "none" : "";
+  run.style.display = s.running ? "" : "none";
+  if (!s.running) return;
+
+  document.getElementById("scanLead").textContent = s.lead || "";
+  document.getElementById("scanMsg").textContent = s.message || "";
+  const err = document.getElementById("scanErr");
+  err.style.display = s.error ? "" : "none";
+  err.textContent = s.error || "";
+
+  const step = document.getElementById("scanStep");
+  step.textContent = s.busy ? "Reading…" : (s.button || "Next");
+  step.disabled = !!s.busy;
+
+  // Each candidate gets its own button: the whole point is that nobody has
+  // to copy a hex address into a settings field by hand.
+  const list = document.getElementById("scanList");
+  list.textContent = "";
+  (s.candidates || []).forEach(c => {
+    const use = el("button", {text:"Use this"});
+    use.addEventListener("click", () => scanPost({do:"apply", addr:c.addr}));
+    const left = el("span", {class:"v", text: c.hex + "  " + c.label + "  = " + c.value});
+    const row = el("div", {class:"row"}, [left, use]);
+    list.appendChild(row);
+  });
+  if (s.more > 0) {
+    list.appendChild(el("div", {class:"row"},
+      [el("span", {class:"k", text:"…and " + s.more + " more. Another round will narrow it."})]));
+  }
+}
+
+document.addEventListener("click", (ev) => {
+  const b = ev.target.closest("[data-scan]");
+  if (b) scanPost({do:"start", mode:b.dataset.scan});
+});
+document.getElementById("scanStep").addEventListener("click", () => scanPost({do:"round"}));
+document.getElementById("scanCancel").addEventListener("click", () => scanPost({do:"cancel"}));
+
 function scalePreview(){
   const box = document.getElementById("ovBox");
   const frame = document.getElementById("ovFrame");
@@ -487,6 +571,10 @@ async function poll(){
   const atBottom = log.scrollTop + log.clientHeight >= log.scrollHeight - 20;
   log.textContent = (s.log || []).join("\n");
   if (atBottom) log.scrollTop = log.scrollHeight;
+
+  if (s.scan && !scanState.busy) { scanState = s.scan; renderScan(); }
+  const need = document.getElementById("scanNeedConsole");
+  if (need) need.style.display = (s.snes && s.snes.connected) ? "none" : "";
 
   // Only rebuild the source dropdowns when OBS reports a different set, so
   // typing in a field isn't interrupted by the poll.

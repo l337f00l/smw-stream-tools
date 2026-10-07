@@ -17,6 +17,7 @@ from .config import DATA_DIR
 from . import layout
 from .obsws import ObsClient, ObsError, ObsRequestError
 from .retro import RetroTracker
+from .scan import ScanSession
 from .snes import SnesTracker
 
 # Which settings force which worker to restart. Anything not listed here — a
@@ -27,7 +28,7 @@ TWITCH_KEYS = ("twitch_channel", "twitch_client_id", "twitch_client_secret",
                "enable_twitch", "allow_insecure_hacks")
 SNES_KEYS = ("snes_url", "snes_device", "exit_addr", "gate_addr", "gate_min",
              "gate_max", "arm_modes", "arm_after_s", "death_addr",
-             "death_value", "poll_ms", "rom_addr", "enable_snes")
+             "death_value", "death_mode", "poll_ms", "rom_addr", "enable_snes")
 RA_KEYS = ("ra_user", "ra_api_key", "ra_game_id", "ra_hardcore", "enable_ra",
            "ra_progress_poll_s", "ra_alerts_on", "ra_alert_poll_s")
 MANUAL_KEYS = ("manual_on", "manual_name", "manual_exits", "manual_author")
@@ -47,6 +48,7 @@ class App(object):
                                 on_change=self.request_render,
                                 on_rom_change=self._rom_changed)
         self.obs = ObsClient(config["obs_url"], config["obs_password"])
+        self.scan = ScanSession(self.snes, log=self.log)
         self.retro = RetroTracker(config, self.data_dir, alerts, log=self.log,
                                   on_change=self.request_render) if alerts else None
 
@@ -107,6 +109,7 @@ class App(object):
         # transient API error, because the last good numbers are still on
         # screen and blinking the row off mid-stream would be worse.
         base["ra_available"] = bool(self.config["enable_ra"] and ra.get("total"))
+        base["scan"] = self.scan.status()
         return base
 
     def request_render(self):

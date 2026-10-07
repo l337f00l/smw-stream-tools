@@ -258,8 +258,8 @@ def cmd_find_death_counter(args):
         lambda after, i: "= %d" % after[i],
         "No byte increments consistently, so this hack probably keeps no\n"
         "death total. Use find-death instead.",
-        "Then send %s to me — the app reads a death state rather than a\n"
-        "  counter today, and this is what I would need to add counter support.")
+        "Then put %s in Death address and set Death detection to\n"
+        "  'A total the hack keeps'.")
 
 
 def cmd_watch(args):

@@ -254,6 +254,13 @@ class SnesTracker(object):
         self._valid_since = None
         self._drops = 0
         self._last_drop = None
+        # Region reads for the address finder, serviced by the poll loop.
+        # Deliberately not a connection of its own: a second client attached
+        # to the same device is how this app once broke itself, and the pak
+        # answers one at a time anyway.
+        self._sample_req = None
+        self._sample_out = None
+        self._sample_evt = threading.Event()
         self.cache = self._load_cache()
 
     # -- per-hack counts --------------------------------------------------
@@ -335,6 +342,50 @@ class SnesTracker(object):
         """
         return self._run and generation == self._generation
 
+    def sample_region(self, base, size, timeout=15.0):
+        """Read a block of memory through the live connection.
+
+        Blocks until the poll loop gets to it, which is at most one poll
+        interval away. Raises rather than returning junk, so a caller never
+        mistakes a failed read for a region of zeroes.
+        """
+        with self._lock:
+            connected = self.state["connected"]
+        if not connected:
+            raise RuntimeError("the console is not connected")
+        with self._lock:
+            self._sample_out = None
+            self._sample_req = (base, size)
+        self._sample_evt.clear()
+        if not self._sample_evt.wait(timeout):
+            raise RuntimeError("timed out waiting for the console")
+        with self._lock:
+            data, error = self._sample_out or (None, "no reply")
+        if error:
+            raise RuntimeError(error)
+        return data
+
+    def _serve_sample(self, snes):
+        """Hand the finder its block, if one was asked for."""
+        with self._lock:
+            request = self._sample_req
+            self._sample_req = None
+        if not request:
+            return
+        try:
+            data = snes.read(request[0], request[1])
+        except Exception as exc:
+            with self._lock:
+                self._sample_out = (None, str(exc))
+            # Set the event before re-raising: a failed read drops the
+            # connection, and the caller must not sit waiting for a reply
+            # that is never coming.
+            self._sample_evt.set()
+            raise
+        with self._lock:
+            self._sample_out = (data, None)
+        self._sample_evt.set()
+
     def _set(self, **kwargs):
         with self._lock:
             changed = any(self.state.get(k) != v for k, v in kwargs.items())
@@ -400,6 +451,7 @@ class SnesTracker(object):
         arm_modes = _hexset(cfg["arm_modes"])
         death_addr = int(cfg["death_addr"], 16) if cfg["death_addr"].strip() else None
         death_value = int(cfg["death_value"], 16) if cfg["death_value"].strip() else None
+        death_mode = (cfg["death_mode"] or "state").strip().lower()
         rom_addr = int(cfg["rom_addr"], 16) if cfg["rom_addr"].strip() else None
         interval = max(cfg["poll_ms"], 50) / 1000.0
         dwell = cfg["arm_after_s"]
@@ -409,6 +461,9 @@ class SnesTracker(object):
             self._armed = True
         armed = self._armed
         death_high = False
+        # None until the first read, so a reconnect resyncs rather than
+        # crediting everything that happened while we were away.
+        last_count = None
         pending, pending_hits = None, 0
         next_rom_check = 0.0
 
@@ -417,6 +472,7 @@ class SnesTracker(object):
 
         while self._active(generation):
             now = time.time()
+            self._serve_sample(snes)
 
             # Which hack is loaded? Identity is title + checksum, because the
             # title alone collides across almost every SMW hack.
@@ -428,6 +484,7 @@ class SnesTracker(object):
                 if rom_id and rom_id != known:
                     armed = self._armed = False
                     self._valid_since = None
+                    last_count = None
                     self._armed_rom = rom_id
                     entry = self._entry(rom_id)
                     self._set(rom=rom_id,
@@ -482,21 +539,31 @@ class SnesTracker(object):
 
             self._set(status="reading", mode=mode, armed=True)
 
-            # Deaths: a rising edge into the dying state.
-            if death_addr is not None and death_value is not None:
-                # From the same sample as the mode above, so a death can never
-                # be credited against a stale mode.
-                dying = sample[death_addr] == death_value
-                if dying and not death_high:
-                    with self._lock:
-                        self.state["deaths"] = (self.state["deaths"] or 0) + 1
-                        total, rom = self.state["deaths"], self.state["rom"]
-                    if rom:
-                        self._entry(rom)["deaths"] = total
-                        self._save_cache()
-                    self.log("deaths = %d" % total)
-                    self.on_change()
-                death_high = dying
+            # Deaths. From the same sample as the mode above, so a death can
+            # never be credited against a stale mode.
+            if death_addr is not None:
+                raw = sample[death_addr]
+                if death_mode == "counter":
+                    # A total the hack keeps itself cannot be missed by
+                    # polling the way a brief state can: whatever happened
+                    # between two reads is still in the number. That matters
+                    # on a retry patch whose death state is gone in a frame or
+                    # two, where watching for the state catches only some of
+                    # them.
+                    if last_count is not None:
+                        # Forward distance, so a counter rolling over 255 is
+                        # still a small step. A reset lands far away instead
+                        # and is rejected by the cap below rather than
+                        # subtracting or adding hundreds.
+                        step = (raw - last_count) & 0xFF
+                        if 0 < step <= 32:
+                            self._add_deaths(step)
+                    last_count = raw
+                elif death_value is not None:
+                    dying = raw == death_value
+                    if dying and not death_high:
+                        self._add_deaths(1)
+                    death_high = dying
 
             value = sample[exit_addr]
 
@@ -526,6 +593,16 @@ class SnesTracker(object):
                     self._store_exits(value)
 
             time.sleep(interval)
+
+    def _add_deaths(self, count):
+        with self._lock:
+            self.state["deaths"] = (self.state["deaths"] or 0) + count
+            total, rom = self.state["deaths"], self.state["rom"]
+        if rom:
+            self._entry(rom)["deaths"] = total
+            self._save_cache()
+        self.log("deaths = %d" % total)
+        self.on_change()
 
     def _store_exits(self, value):
         with self._lock:

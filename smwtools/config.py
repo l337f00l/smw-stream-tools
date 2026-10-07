@@ -61,6 +61,9 @@ DEFAULTS = {
     "arm_after_s": 10,
     "death_addr": "F5009D",
     "death_value": "30",
+    # "state" watches for a byte meaning "dying"; "counter" watches a
+    # total the hack keeps itself, for retries too quick to catch.
+    "death_mode": "state",
     "poll_ms": 200,
     "rom_addr": "007FC0",
 

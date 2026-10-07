@@ -155,6 +155,30 @@ def make_server(app, config, alerts, actions, port):
                 moved = [key for key in after if before.get(key) != after.get(key)]
                 app.restart_workers(moved)
                 self._json({"ok": True, "config": config.public()})
+            elif route == "/api/scan":
+                # The finder reads through the tracker's own connection, so
+                # these never open a second client on the device.
+                what = body.get("do")
+                try:
+                    if what == "start":
+                        result = app.scan.start(body.get("mode") or "deaths")
+                    elif what == "round":
+                        result = app.scan.step()
+                    elif what == "apply":
+                        keys = app.scan.apply(config, int(body.get("addr")))
+                        app.restart_workers(keys)
+                        result = app.scan.status()
+                    elif what == "cancel":
+                        app.scan.reset()
+                        result = app.scan.status()
+                    else:
+                        self._json({"ok": False, "error": "unknown step"}, 400)
+                        return
+                except Exception as exc:
+                    self._json({"ok": False, "error": str(exc)}, 500)
+                    return
+                self._json({"ok": True, "scan": result,
+                            "config": config.public()})
             elif route == "/api/action":
                 name = body.get("action")
                 handler = actions.get(name)
