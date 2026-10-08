@@ -168,6 +168,10 @@ def make_server(app, config, alerts, actions, port):
                         keys = app.scan.apply(config, int(body.get("addr")))
                         app.restart_workers(keys)
                         result = app.scan.status()
+                    elif what == "clear_override":
+                        rom = (app.snes.state or {}).get("rom")
+                        app.snes.clear_hack_deaths(rom)
+                        result = app.scan.status()
                     elif what == "cancel":
                         app.scan.reset()
                         result = app.scan.status()

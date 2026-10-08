@@ -95,6 +95,7 @@ class App(object):
             base = {k: (dict(v) if isinstance(v, dict) else v)
                     for k, v in self.state.items()}
         snes = dict(self.snes.state)
+        snes["death_override"] = self.snes.override_summary()
         hack = base.get("hack")
         base["snes"] = snes
         base["exits_text"] = self.compose_exits()

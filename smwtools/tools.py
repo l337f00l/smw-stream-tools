@@ -23,7 +23,9 @@ import time
 from .config import Config
 from .snes import Usb2Snes, WRAM_BASE, FILLER
 
-LOWRAM_SIZE = 0x2000       # $7E:0000-$7E:1FFF — SMW's working variables
+# All of WRAM, $7E and $7F. Hacks with custom patches keep their state
+# outside vanilla's first 8KB, so searching only that misses them.
+WRAM_SIZE = 0x20000
 
 COMMANDS = ("devices", "title", "scan", "probe", "watch", "deaths",
             "find-death", "find-death-counter")
@@ -360,7 +362,7 @@ def build_parser():
 
     def add_region(p):
         p.add_argument("--base", type=_hex, default=WRAM_BASE)
-        p.add_argument("--size", type=_hex, default=LOWRAM_SIZE)
+        p.add_argument("--size", type=_hex, default=WRAM_SIZE)
         return p
 
     add("devices", "list the devices the server can see")

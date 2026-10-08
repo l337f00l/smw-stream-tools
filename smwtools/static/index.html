@@ -157,6 +157,15 @@
     <div class="card" id="scanCard" style="margin-top:16px">
       <h2>Find an address</h2>
       <div id="scanIdle">
+        <div id="scanOverride" class="live" style="display:none;margin-bottom:12px">
+          <div class="row">
+            <span class="k">This hack uses its own death address</span>
+          </div>
+          <div class="row">
+            <span class="v" id="scanOverrideText"></span>
+            <button id="scanClear">Use the default</button>
+          </div>
+        </div>
         <p class="note" style="margin-top:0">If deaths are being missed, or the
           exit count never moves, this hack keeps its numbers somewhere other
           than the usual place. Find out where — no typing, just play and
@@ -276,8 +285,8 @@ const FIELDS = [
   ]],
   ["Advanced", "Memory addresses and timing. The defaults are what testing settled on.", [
     ["exit_addr", "Exit counter address", "text", "Hex."],
-    ["death_mode", "Death detection", "select:state=A byte that means \"dying\",counter=A total the hack keeps", "Switch to counter if deaths are being missed — see the README."],
-    ["death_addr", "Death address", "text", "Hex. F5009D is the sprite-lock byte; a counter address comes from find-death-counter."],
+    ["death_mode", "Death detection", "select:state=A byte that means \"dying\",counter=A total the hack keeps", "Leave this alone. If deaths are being missed, use Find the death counter above — it sets both of these for you."],
+    ["death_addr", "Death address", "text", "Hex. F5009D is the sprite-lock byte, and the default that works for most hacks. Find the death counter above fills this in when a hack needs something else."],
     ["death_value", "Death state value", "text", "Hex. 30 during a death, 04 on a pipe, 00 on a door. Not used in counter mode."],
     ["gate_addr", "Game mode address", "text", "Hex."],
     ["gate_min", "Lowest readable mode", "text", "Hex."],
@@ -503,6 +512,7 @@ document.addEventListener("click", (ev) => {
 });
 document.getElementById("scanStep").addEventListener("click", () => scanPost({do:"round"}));
 document.getElementById("scanCancel").addEventListener("click", () => scanPost({do:"cancel"}));
+document.getElementById("scanClear").addEventListener("click", () => scanPost({do:"clear_override"}));
 
 function scalePreview(){
   const box = document.getElementById("ovBox");
@@ -573,6 +583,17 @@ async function poll(){
   if (atBottom) log.scrollTop = log.scrollHeight;
 
   if (s.scan && !scanState.busy) { scanState = s.scan; renderScan(); }
+  // Whatever a hack was found to need is remembered against that hack, so
+  // say which hack is overriding and offer a way back.
+  const ov = (s.snes && s.snes.death_override) || null;
+  const ovBox = document.getElementById("scanOverride");
+  if (ovBox) {
+    ovBox.style.display = ov ? "" : "none";
+    if (ov) {
+      document.getElementById("scanOverrideText").textContent =
+        ov.addr + (ov.mode === "counter" ? "  (a total it keeps)" : "  (a dying state)");
+    }
+  }
   const need = document.getElementById("scanNeedConsole");
   if (need) need.style.display = (s.snes && s.snes.connected) ? "none" : "";
 

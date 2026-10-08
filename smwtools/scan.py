@@ -17,7 +17,11 @@ too brief to catch.
 import threading
 
 WRAM_BASE = 0xF50000
-REGION_SIZE = 0x2000       # $7E:0000-$7E:1FFF, SMW's working variables
+# All of WRAM, $7E and $7F. The first 8KB holds vanilla SMW's own variables
+# and was the original search area, but a hack with a custom retry patch
+# usually keeps its state well outside that — the one that prompted this kept
+# its death total at $7F:B424, which an 8KB search could never have found.
+REGION_SIZE = 0x20000
 
 MODES = {
     "deaths": {
@@ -149,11 +153,28 @@ class ScanSession(object):
         return self.status()
 
     def apply(self, config, addr):
-        """Write the chosen address into the settings."""
+        """Record the chosen address.
+
+        A death address belongs to the hack it was found in, not to the app:
+        the next hack will keep its deaths somewhere else, and a counter
+        address from one hack is arbitrary memory in another. So it is saved
+        against the loaded ROM, and switching hacks switches the setting with
+        no action from anyone.
+        """
         with self._lock:
             mode = self.mode
         if mode not in MODES:
             raise ValueError("no search is running")
+
+        rom = (self.tracker.state or {}).get("rom")
+        if mode == "deaths" and rom:
+            self.tracker.set_hack_deaths(rom, "%06X" % addr, "counter")
+            with self._lock:
+                self.message = ("Saved for this hack. Other hacks keep their "
+                                "own settings, so switching is automatic.")
+                self.done = True
+            return []
+
         changes = {}
         for key, form in MODES[mode]["applies"].items():
             changes[key] = (form % addr) if "%" in form else form

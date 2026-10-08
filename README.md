@@ -16,7 +16,7 @@ Either way there is no Python to install inside OBS, which was historically the 
 
 Exits come from the game's own counter. That matters because the hack decides what counts as an exit: switch palaces that aren't meant to count, bonus levels, keyhole and orb exits that never show a COURSE CLEAR banner. Reading the counter gets all of that right without maintaining a list of special cases.
 
-Deaths come from SMW's sprite-lock byte, which holds a distinct value for about a second during a death, and different values again for pipes and doors — so entering a sublevel never looks like dying.
+Deaths come from SMW's sprite-lock byte, which holds a distinct value during a death and different values again for pipes and doors — so entering a sublevel never looks like dying. Hacks with a custom retry patch clear it too fast to rely on, and [one button](#when-deaths-arent-counting-right) teaches the app where those hacks keep their own death total.
 
 ## What you need
 
@@ -271,7 +271,7 @@ Most defaults are fine. These are the ones worth knowing about:
 | Exits format | `Exits {done}/{total}` | `{done} {total} {name} {author} {deaths}` all work |
 | Arm after N seconds | `10` | How long before trusting readings on a hack with no overworld |
 | Alert check interval | `10` | This is the delay you see on stream when an achievement unlocks |
-| Death detection | state | Switch to counter if deaths are being missed |
+| Death detection | state | Don't set this by hand — **Find the death counter** switches it when a hack needs it |
 | Death address | `F5009D` | Only if a hack behaves oddly — see the scan tools |
 
 ## Troubleshooting
@@ -349,31 +349,81 @@ Anything you've switched off is ignored, so leaving RetroAchievements disabled n
 
 ## When deaths aren't counting right
 
-Deaths are the fiddliest part of this, because the game doesn't count them — there's no death total to read the way there is for exits. What gets read instead is a byte that means "the player is dying", and hacks differ in how long they leave it set and whether they use it at all.
+Deaths are the one thing the game doesn't count for you. There's no death total sitting in memory the way there is for exits, so what gets read instead is a byte that means "the player is dying" — and hacks disagree about that byte more than about anything else in this app.
 
-**Check the Deaths number on the dashboard first**, not the one on stream. If the dashboard is right and the overlay is wrong, the problem is the source, not the counting.
+**Most hacks need nothing.** A hack built straight on Super Mario World leaves that byte where vanilla put it, the app samples it every 20 milliseconds while you're in a level, and deaths count correctly with no setup at all.
 
-| What you see | What it usually is | What to do |
-|---|---|---|
-| Some deaths missed, the rest fine | The hack clears the dying byte within a frame or two, so deaths fall between polls | **Find the death counter** on the dashboard. Failing that, **Poll interval** 50 |
-| No deaths at all, ever | **Death address** is empty, or the console never armed | Check the Console pill reads `reading`. Check **Death address** is `F5009D` |
-| Goes up when you enter a pipe or a door | **Death state value** is wrong | It should be `30`. `04` is a pipe and `00` is a door — those are what it must ignore |
-| Goes up by two or three per death | The address holds the value in bursts | Switch to **Find the death counter**, which counts the hack's total instead |
-| Stuck at a number, nothing moves | Console disconnected, or waiting to arm | Console pill again — `waiting to arm` clears itself after ten seconds of play |
-| Carried over from the hack before | The ROM identity didn't change | Counts are filed per hack by title **and** checksum. If two hacks share both, they share a count |
-| Off by a few after testing | Nothing wrong; you earned some of those deaths on purpose | Use **Deaths −1 / +1** on the dashboard to nudge it back |
+The hacks that need help are the ones with a custom retry patch. The prompt appears before the death animation really plays, so the byte is set and cleared in under two frames — 23 milliseconds, measured on hardware. Some of those hacks keep a death total of their own instead, somewhere else in memory entirely, and a total can't be missed the way a 23ms flicker can.
 
-Resetting the console doesn't affect the count either way — the game-mode gate stops reading before the reset can look like a death.
+So if a hack is undercounting badly — you've died twenty times and it says four — that's the one to fix, and there's a button for it.
 
-### Checking a fix
+### The fix
 
-Whatever you change, confirm it the same way, because the two mistakes look identical on a scoreboard and opposite in cause:
+About a minute, and you do it once per hack.
+
+1. Load the hack and get into a level.
+2. On the settings page, scroll to **Find an address** and click **Find the death counter**.
+3. Die, let the retry finish, then click **I died**.
+4. Repeat step 3 two or three more times. Each round discards every address that didn't behave like a counter, so the list shrinks quickly.
+5. When one address is left, click **Use this**.
+
+![The address finder](docs/find-address.png)
+
+That's all of it. **Use this** fills in both the address and the detection mode together, which is the reason not to set either by hand — one without the other behaves exactly like the app being broken.
+
+**It's remembered for that hack only.** The setting is filed against the loaded ROM, so returning to that hack later needs no action from you, and no other hack is touched. Hacks you haven't taught keep using the defaults. The **Find an address** card tells you when the loaded hack has an address of its own, with a button to drop back to the defaults if you set one by mistake.
+
+That per-hack filing is also why the app doesn't simply watch both addresses at once. A counter address from one hack is arbitrary memory in another, and if it happened to tick you'd be shown deaths that never happened.
+
+### If the finder comes up empty
+
+Then the hack keeps no death total and there's nothing to find. Lower **Poll interval** under Advanced instead: at the default 200 a very brief death state is caught perhaps a fifth of the time, where 50 catches most of it. Below 50 the returns collapse, and it's 20 reads a second competing with anything else using the pak.
+
+### Confirming a fix
+
+However you fixed it, confirm it the same way, because the two mistakes look identical on a scoreboard and opposite in cause:
 
 1. **Die once.** The number goes up by exactly one.
 2. **Go through a pipe.** It does not move.
 3. **Go through a door.** It does not move.
 
-Pipes and doors are what break death counting, and they're the step people skip. A setting that counts deaths *and* doors looks fine for a level and then drifts all stream.
+Pipes and doors are what break death counting, and they're the step people skip. A setting that counts deaths *and* doors looks fine for one level and then drifts all stream.
+
+### Other symptoms
+
+Check the Deaths number on the dashboard first, not the one on stream. If the dashboard is right and the overlay is wrong, the problem is the source, not the counting.
+
+| What you see | What it usually is | What to do |
+|---|---|---|
+| No deaths at all, ever | **Death address** is empty, or the console never armed | Check the Console pill reads `reading`, and that **Death address** is `F5009D` |
+| Goes up when you enter a pipe or a door | **Death state value** is wrong | It should be `30`. `04` is a pipe and `00` is a door — those are what it has to ignore |
+| Goes up by two or three per death | The address holds the value in bursts | **Find the death counter**, which counts the hack's own total instead |
+| Stuck at a number, nothing moves | Console disconnected, or waiting to arm | Console pill again — `waiting to arm` clears itself after ten seconds of play |
+| Carried over from the hack before | The ROM identity didn't change | Counts are filed per hack by internal title **and** checksum. Two hacks sharing both share a count |
+| Worked on one hack, stopped on the next | They detect deaths differently | Expected. Run **Find the death counter** once on the new hack; each hack keeps its own setting |
+| Off by a few after testing | Nothing wrong — you earned some of those on purpose | **Deaths −1 / +1** on the dashboard nudges it back |
+
+Resetting the console doesn't affect the count either way: the game-mode gate stops reading before the reset can look like a death.
+
+### What the log tells you
+
+The log on the settings page says more than the number does. Each death is recorded like this:
+
+```
+deaths = 3  (7 of 412 samples saw it)
+```
+
+The number in brackets is how many reads actually caught the death byte set. It separates the two faults that look the same from outside:
+
+- **Deaths going up, samples seeing it** — working.
+- **Samples seeing it, deaths not going up** — the byte is set but never clearing, so there's no edge to count. Wrong value for this hack.
+- **Samples never seeing it** — the state is too brief to catch. Use the counter.
+
+If a byte stays at the death value longer than any death animation could last, the log says so outright rather than leaving you to work it out:
+
+```
+death byte stuck at 0x30 — deaths after this will not count. Wrong value for this hack?
+```
 
 ### Values are hex
 
@@ -391,17 +441,9 @@ You need it when a hack doesn't play along — deaths being missed, or an exit c
 
 ### From the settings page
 
-The **Find an address** card on the dashboard does this without any typing. Pick **Find the death counter** or **Find the exit counter**, then play and press the button after each death or exit. It narrows the possibilities each round and usually gets there in two or three.
+The **Find an address** card on the dashboard does this without any typing: play, press a button after each death or exit, and it narrows the possibilities each round. **Find the death counter** is the one most people want, and it's walked through step by step in [When deaths aren't counting right](#when-deaths-arent-counting-right). **Find the exit counter** works the same way for a hack whose exit count never moves — clear a level that should count, then press the button.
 
-![The address finder](docs/find-address.png)
-
-When it's down to one, press **Use this** and it fills in the settings for you — for a death counter that's both the address and switching **Death detection** over to it. Nothing to copy, and it works from the executable, which the command-line tools can't.
-
-It reads through the connection the app already has, so it won't disturb the console or clash with RA2Snes.
-
-**Deaths being undercounted is what this is mostly for.** The default watches for a byte that means "dying", and some retry patches clear it within a frame or two — the prompt appears before the death animation really plays — so most deaths fall between polls. A total the hack keeps itself can't be missed that way, because whatever happened between two reads is still in the number.
-
-If no byte goes up by one each time, the hack keeps no total. Then lower **Poll interval**: at the default 200 a very brief state is caught perhaps a fifth of the time, where 50 catches most of it. Below 50 the returns collapse, and it's 20 reads a second competing with anything else using the pak.
+It reads through the connection the app already has, so it won't disturb the console or clash with RA2Snes. It also works from the executable, which the command-line tools can't.
 
 ### From the command line
 
