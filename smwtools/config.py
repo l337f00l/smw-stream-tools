@@ -66,6 +66,13 @@ DEFAULTS = {
     "death_mode": "state",
     "poll_ms": 200,
     "rom_addr": "007FC0",
+    # Translevel number: "set during transfer from world map to level. This
+    # identifies the first room of the current level." Sublevels reached by a
+    # pipe or a door keep the same value, which is what makes it the right
+    # granularity for per-level deaths — a four-room level counts as one level.
+    "level_addr": "F513BF",
+    # Which total the deaths line shows: the whole hack, or the current level.
+    "deaths_scope": "hack",       # hack | level
 
     # OBS sources
     "name_source": "",

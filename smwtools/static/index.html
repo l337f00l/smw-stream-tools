@@ -112,7 +112,9 @@
       <div class="live">
         <div class="row"><span class="k">Hack</span><span class="v" id="lvHack">—</span></div>
         <div class="row"><span class="k">Exits</span><span class="v big accent" id="lvExits">—</span></div>
-        <div class="row"><span class="k">Deaths</span><span class="v big" id="lvDeaths">—</span></div>
+        <div class="row"><span class="k">Deaths (hack)</span><span class="v big" id="lvDeaths">—</span></div>
+        <div class="row"><span class="k">Deaths (this level)</span><span class="v big" id="lvLevelDeaths">—</span></div>
+        <div class="row"><span class="k">Level</span><span class="v" id="lvLevel">—</span></div>
         <div class="row"><span class="k">Game mode</span><span class="v" id="lvMode">—</span></div>
         <div class="row"><span class="k">ROM</span><span class="v" id="lvRom">—</span></div>
       </div>
@@ -120,6 +122,15 @@
         <button data-action="deaths_minus">Deaths −1</button>
         <button data-action="deaths_plus">Deaths +1</button>
         <button data-action="deaths_reset">Reset deaths</button>
+      </div>
+      <div class="btns">
+        <button data-action="level_minus">Level −1</button>
+        <button data-action="level_plus">Level +1</button>
+        <button data-action="level_reset">Reset this level</button>
+      </div>
+      <div id="lvWorst" style="display:none;margin-top:12px">
+        <div class="row"><span class="k">Deaths by level</span></div>
+        <div class="live" id="lvWorstRows"></div>
       </div>
     </div>
 
@@ -222,13 +233,16 @@ const FIELDS = [
     ["snes_device", "Device filter", "text", "Blank uses the first device. Try bizhawk or fxpak when both are connected."],
     ["enable_snes", "Read from the console", "bool", ""],
   ]],
+  ["Deaths shown", "Applies to the OBS deaths source and the browser overlay together. Both numbers are counted at the same time, so switching shows the other one straight away and nothing is lost either way.", [
+    ["deaths_scope", "Deaths line shows", "select:hack=Total for the whole hack,level=Just the level you're on", "Levels are told apart by SMW's own level number, so a level built from several rooms joined by pipes and doors counts as one level."],
+  ]],
   ["OBS sources", "Which text sources get written. Leave any blank to skip it.", [
     ["name_source", "Hack name", "source", ""],
     ["exits_source", "Exits", "source", ""],
     ["deaths_source", "Deaths", "source", ""],
     ["author_source", "Author", "source", ""],
     ["exits_format", "Exits format", "text", "{done} {total} {name} {author} {deaths}"],
-    ["deaths_format", "Deaths format", "text", "{deaths}"],
+    ["deaths_format", "Deaths format", "text", "{deaths} follows the setting above. {hack_deaths} and {level_deaths} always mean one each, for a line showing both."],
     ["author_format", "Author format", "text", "{author}"],
   ]],
   ["Manual hack", "Type the hack name and its exit total yourself, for a hack the index doesn't list or if you'd rather not set up Twitch at all. Exits and deaths still come from the console.", [
@@ -285,6 +299,7 @@ const FIELDS = [
   ]],
   ["Advanced", "Memory addresses and timing. The defaults are what testing settled on.", [
     ["exit_addr", "Exit counter address", "text", "Hex."],
+    ["level_addr", "Level number address", "text", "Hex. SMW's translevel number, used to tell levels apart for per-level deaths. Blank turns per-level counting off."],
     ["death_mode", "Death detection", "select:state=A byte that means \"dying\",counter=A total the hack keeps", "Leave this alone. If deaths are being missed, use Find the death counter above — it sets both of these for you."],
     ["death_addr", "Death address", "text", "Hex. F5009D is the sprite-lock byte, and the default that works for most hacks. Find the death counter above fills this in when a hack needs something else."],
     ["death_value", "Death state value", "text", "Hex. 30 during a death, 04 on a pipe, 00 on a door. Not used in counter mode."],
@@ -569,6 +584,36 @@ async function poll(){
   document.getElementById("lvExits").textContent =
       s.hack ? ((sn.exits == null ? "—" : sn.exits) + " / " + (s.hack.exits || "?")) : "—";
   document.getElementById("lvDeaths").textContent = sn.deaths == null ? "—" : sn.deaths;
+  document.getElementById("lvLevelDeaths").textContent =
+      sn.level_deaths == null ? "—" : sn.level_deaths;
+  document.getElementById("lvLevel").textContent = sn.level ? ("0x" + sn.level) : "—";
+
+  // Worst levels first. Rebuilt only when the numbers actually move, so the
+  // list doesn't flicker under a once-a-second poll.
+  const worst = sn.levels || [];
+  const worstBox = document.getElementById("lvWorst");
+  // The current level is part of the key because the "(now)" marker moves
+  // with it even when none of the numbers changed.
+  const worstKey = JSON.stringify([worst, sn.level]);
+  if (worstBox.dataset.key !== worstKey) {
+    worstBox.dataset.key = worstKey;
+    worstBox.style.display = worst.length ? "" : "none";
+    const rows = document.getElementById("lvWorstRows");
+    rows.textContent = "";
+    worst.forEach(row => {
+      const line = document.createElement("div");
+      line.className = "row";
+      const key = document.createElement("span");
+      key.className = "k";
+      key.textContent = "Level 0x" + row.level + (row.level === sn.level ? " (now)" : "");
+      const val = document.createElement("span");
+      val.className = "v";
+      val.textContent = row.deaths;
+      line.append(key, val);
+      rows.append(line);
+    });
+  }
+
   document.getElementById("lvMode").textContent =
       sn.mode == null ? "—" : ("0x" + sn.mode.toString(16).toUpperCase().padStart(2,"0"));
   document.getElementById("lvRom").textContent = sn.rom || "—";

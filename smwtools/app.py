@@ -28,7 +28,8 @@ TWITCH_KEYS = ("twitch_channel", "twitch_client_id", "twitch_client_secret",
                "enable_twitch", "allow_insecure_hacks")
 SNES_KEYS = ("snes_url", "snes_device", "exit_addr", "gate_addr", "gate_min",
              "gate_max", "arm_modes", "arm_after_s", "death_addr",
-             "death_value", "death_mode", "poll_ms", "rom_addr", "enable_snes")
+             "death_value", "death_mode", "poll_ms", "rom_addr", "level_addr",
+             "enable_snes")
 RA_KEYS = ("ra_user", "ra_api_key", "ra_game_id", "ra_hardcore", "enable_ra",
            "ra_progress_poll_s", "ra_alerts_on", "ra_alert_poll_s")
 MANUAL_KEYS = ("manual_on", "manual_name", "manual_exits", "manual_author")
@@ -96,6 +97,9 @@ class App(object):
                     for k, v in self.state.items()}
         snes = dict(self.snes.state)
         snes["death_override"] = self.snes.override_summary()
+        # Worst levels first, which is the question anyone actually asks of a
+        # per-level count. Capped because the dashboard is not a spreadsheet.
+        snes["levels"] = self.snes.level_table()[:8]
         hack = base.get("hack")
         base["snes"] = snes
         base["exits_text"] = self.compose_exits()
@@ -151,21 +155,44 @@ class App(object):
                 done_raw=done, total_raw=total,
                 name=hack["display"], author=hack.get("author", ""),
                 difficulty=hack.get("difficulty", ""), type=hack.get("type", ""),
-                deaths=self.snes.state.get("deaths") or 0)
+                **self.death_tokens())
         except (KeyError, IndexError, ValueError):
             self.log("bad exits format %r — using the default" % template)
             return "Exits %s/%s" % (str(done).zfill(width), str(total).zfill(width))
 
+    def death_tokens(self):
+        """The death numbers every format string can use.
+
+        `{deaths}` is whichever one the Deaths shown setting picks, so flipping
+        that setting is all it takes — no format to rewrite. The other two are
+        always available by name, for a line that wants to show both.
+
+        When the level isn't known yet — the first second after connecting,
+        before any level has been entered — level scope falls back to the hack
+        total rather than flashing a zero on stream.
+        """
+        state = self.snes.state
+        total = state.get("deaths")
+        here = state.get("level_deaths")
+        scope = (self.config.get("deaths_scope") or "hack").strip().lower()
+        shown = here if (scope == "level" and here is not None) else total
+        return {
+            "deaths": shown if shown is not None else 0,
+            "hack_deaths": total if total is not None else 0,
+            "level_deaths": here if here is not None else 0,
+            "level": state.get("level") or "",
+        }
+
     def compose_deaths(self):
-        deaths = self.snes.state.get("deaths")
-        if deaths is None:
+        if self.snes.state.get("deaths") is None:
             return ""
+        tokens = self.death_tokens()
         template = (self.config["deaths_format"] or "Deaths: {deaths}")
         template = template.replace("\\n", "\n")
         try:
-            return template.format(deaths=deaths)
+            return template.format(**tokens)
         except (KeyError, IndexError, ValueError):
-            return "Deaths: %d" % deaths
+            return "Deaths: %s" % tokens["deaths"]
 
     def _wants_author(self):
         """Is the author going to be shown anywhere?

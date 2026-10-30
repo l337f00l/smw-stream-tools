@@ -269,6 +269,7 @@ Most defaults are fine. These are the ones worth knowing about:
 | Use the hack below | off | Type the hack name and exit total instead of matching a Twitch title |
 | Device filter | blank | Set to `fxpak` or `bizhawk` when both are connected |
 | Exits format | `Exits {done}/{total}` | `{done} {total} {name} {author} {deaths}` all work |
+| Deaths line shows | Total for the whole hack | Switch to the current level if you'd rather show that — see below |
 | Arm after N seconds | `10` | How long before trusting readings on a hack with no overworld |
 | Alert check interval | `10` | This is the delay you see on stream when an achievement unlocks |
 | Death detection | state | Don't set this by hand — **Find the death counter** switches it when a hack needs it |
@@ -347,6 +348,37 @@ Anything you've switched off is ignored, so leaving RetroAchievements disabled n
 
 **No icon appearing?** The app keeps running without one, and the reason is in the log on the settings page — usually that `pystray` and `Pillow` aren't installed. On Windows the icon starts in the hidden-items overflow; drag it onto the taskbar to pin it there.
 
+## Deaths for the whole hack, or just this level
+
+Both numbers are counted at the same time, always. **Deaths shown** picks which one the deaths line displays:
+
+| | |
+|---|---|
+| **Total for the whole hack** | Every death since you started this hack. The default |
+| **Just the level you're on** | Deaths on the level you're playing right now |
+
+Switching is instant and costs nothing — the other number was being kept the whole time, so there's no count to rebuild and nothing to lose by changing your mind mid-stream.
+
+The dashboard shows both, plus a **Deaths by level** list with the worst level first, which answers the question people actually ask of a per-level count.
+
+**What counts as one level.** Levels are told apart by SMW's own level number, the one the overworld uses. A level built from several rooms joined by pipes and doors is one level, because that number doesn't change when you take a pipe — which is what you want, since a four-room level is one level to the person playing it.
+
+A death is credited to the level you were in when you died, not to wherever the game went next. That matters for a death that sends you back to the overworld: the level number has already changed by the time the death is reported, so the app latches the level on entry and uses the latched value.
+
+**Showing both at once.** The deaths line is a format string, so it can carry either number by name regardless of the setting:
+
+| Token | Means |
+|---|---|
+| `{deaths}` | Whichever one **Deaths shown** is set to |
+| `{hack_deaths}` | Always the whole hack |
+| `{level_deaths}` | Always the current level |
+
+So `Deaths: {level_deaths} (this level) / {hack_deaths} (total)` shows both, and the setting stops mattering.
+
+**Fixing the numbers.** **Level −1**, **Level +1** and **Reset this level** on the dashboard touch only the level being played. They're separate from the hack buttons on purpose: correcting a death you earned on purpose shouldn't also blame whichever level you happened to be standing in.
+
+**Turning it off.** Clear **Level number address** under Advanced. Deaths still count for the hack; nothing is attributed to a level. Worth doing only if a hack's level number turns out to behave strangely — the dashboard's **Level** row is where you'd see that, since it should change when you enter a level and hold steady through pipes, doors and retries.
+
 ## When deaths aren't counting right
 
 Deaths are the one thing the game doesn't count for you. There's no death total sitting in memory the way there is for exits, so what gets read instead is a byte that means "the player is dying" — and hacks disagree about that byte more than about anything else in this app.
@@ -397,6 +429,7 @@ Check the Deaths number on the dashboard first, not the one on stream. If the da
 |---|---|---|
 | No deaths at all, ever | **Death address** is empty, or the console never armed | Check the Console pill reads `reading`, and that **Death address** is `F5009D` |
 | Goes up when you enter a pipe or a door | **Death state value** is wrong | It should be `30`. `04` is a pipe and `00` is a door — those are what it has to ignore |
+| Goes up when a Yoshi hatches out of a block | Not a wrong setting — that freezes sprites exactly like a death does | Nothing to change. The animation check handles it once one real death on that hack has armed it |
 | Goes up by two or three per death | The address holds the value in bursts | **Find the death counter**, which counts the hack's own total instead |
 | Stuck at a number, nothing moves | Console disconnected, or waiting to arm | Console pill again — `waiting to arm` clears itself after ten seconds of play |
 | Carried over from the hack before | The ROM identity didn't change | Counts are filed per hack by internal title **and** checksum. Two hacks sharing both share a count |
@@ -404,6 +437,50 @@ Check the Deaths number on the dashboard first, not the one on stream. If the da
 | Off by a few after testing | Nothing wrong — you earned some of those on purpose | **Deaths −1 / +1** on the dashboard nudges it back |
 
 Resetting the console doesn't affect the count either way: the game-mode gate stops reading before the reset can look like a death.
+
+### When something that isn't a death gets counted
+
+`$7E:009D`, the byte deaths are read from by default, is not a death flag. The RAM map calls it the "lock animation and sprites flag", and the game sets it for anything that freezes the scene — dying, grabbing a powerup, a Yoshi hatching out of a block. Some routines even store a countdown timer into it, which passes through every value on its way down. So no single value is unique to dying, and pipes at `04` and doors at `00` were only the first two cases found.
+
+The app now settles it by also watching the player's own animation trigger at `$7E:0071`. When a lock appears, that byte is watched for a moment: dying sets it, a Yoshi hatching doesn't.
+
+**It arms itself, and only on hacks where it works.** The first time a death on a hack is seen to move the animation trigger, the log says so:
+
+```
+deaths on this hack move the animation trigger, so a sprite lock on its own
+will no longer be counted as one
+```
+
+From then on, on that hack, a lock with no dying animation is ignored and reported:
+
+```
+ignored a sprite lock that wasn't a death (1 so far on this hack).
+Yoshi hatching out of a block does this.
+```
+
+A hack whose animation trigger never fires never arms it and keeps counting exactly as it did before, so nothing is lost by it being on. It's remembered per hack, so a hack set up once is armed from the first death next time.
+
+**If it ever gets it wrong**, it gives up by itself. Eight locks in a row with no dying animation and no death in between is more likely to mean the trigger is being missed than that you hit eight Yoshi blocks without dying, so the check is dropped for that hack and ordinary counting resumes:
+
+```
+8 sprite locks in a row with no dying animation, so the animation check is
+being dropped for this hack — counting every lock again, the way it worked
+before.
+```
+
+That bounds the worst case at seven missed deaths rather than a stream's worth, which is the trade this is built around: counting a few extra is recoverable with **Deaths −1**, silently losing them all is not.
+
+This costs two reads per sample instead of one, but only while resolving a lock that has just appeared — a few times an hour, not fifty times a second. The 20ms watcher is untouched.
+
+### If a hack keeps its own death total
+
+Kevin's Retry System — the retry patch behind most modern kaizo prompts — keeps a death total at a documented address, five bytes holding one decimal digit each. When the app sees five bytes there that are all digits, which arbitrary memory manages about once in ten million, it says so in the log:
+
+```
+Retry System death counter found at F6B43B: 147 deaths on this save.
+```
+
+Right now that's a report, not a source. A hack can relocate the patch's free RAM, and reading digits from the wrong place would count nonsense, so nothing switches to it on its own. But if that line appears and its number tracks your real deaths, it's a better signal than anything watching for a death animation, because a total can't be missed by polling at all. Worth mentioning if your counts ever disagree with it.
 
 ### What the log tells you
 
@@ -413,17 +490,22 @@ The log on the settings page says more than the number does. Each death is recor
 deaths = 3  (7 of 412 samples saw it)
 ```
 
-The number in brackets is how many reads actually caught the death byte set. It separates the two faults that look the same from outside:
+The number in brackets is how many reads actually caught the death byte set, out of how many were taken since the last death. A healthy line on a prompt-retry hack is a small fraction — 10 to 20 percent is normal, because most of that time you were playing, not dying.
 
-- **Deaths going up, samples seeing it** — working.
-- **Samples seeing it, deaths not going up** — the byte is set but never clearing, so there's no edge to count. Wrong value for this hack.
+- **Deaths going up, a small fraction of samples seeing it** — working.
+- **Nearly every sample seeing it, over and over, while you're playing** — the byte is at that value during normal play, so it's the wrong value for this hack.
 - **Samples never seeing it** — the state is too brief to catch. Use the counter.
 
-If a byte stays at the death value longer than any death animation could last, the log says so outright rather than leaving you to work it out:
+A long run of high samples on its own is not a fault. A retry prompt holds sprites locked until you answer it, so the byte sits at the death value for as long as the prompt is up — and if you step away or talk to chat, that can be minutes. One real death at the start of a three-minute prompt shows up as `5746 of 5875 samples saw it`, which looks alarming and is completely correct.
+
+After a minute and a half of that, the log mentions it once:
 
 ```
-death byte stuck at 0x30 — deaths after this will not count. Wrong value for this hack?
+death byte has read 0x30 for 90 seconds. That is normal while a retry prompt
+or a pause is waiting on you — counting carries on as soon as it clears.
 ```
+
+Counting resumes the moment the byte falls, because deaths are counted when it rises, not while it's high. It's only a real fault if that line keeps appearing while you're actually playing.
 
 ### Values are hex
 

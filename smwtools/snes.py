@@ -34,6 +34,53 @@ FILLER = 0x55          # what WRAM reads as while a ROM is loading
 # simply gets fewer samples rather than falling behind.
 DEATH_WATCH_MS = 20
 
+# Game modes from here up mean "in a level" rather than on the overworld. The
+# level number is only re-read when the mode crosses this line, because that is
+# the only moment it can change — a death-and-retry reload stays above it the
+# whole way (0F -> 11 -> 12 -> 13 -> 14 on hardware), so retries cost no reads.
+IN_LEVEL_MODE = 0x0F
+
+# The level number is read once the game has settled into play, not the moment
+# it starts fading in. The translevel byte is "set during transfer from world
+# map to level", so reading it at the fade can catch it before it has been
+# written and record level 00 for a level that is nothing of the sort.
+SETTLED_MODE = 0x14
+
+# How long the death byte may sit at the death value before it is worth
+# mentioning. A death animation is over in well under a second, but a retry
+# prompt holds sprites locked until the player answers it, and a player who
+# steps away or talks to chat can leave one up for minutes. Three seconds —
+# the first guess here — called that a fault on a hack that was counting
+# perfectly, which is worse than saying nothing.
+HELD_WARN_S = 90
+
+# $9D locks sprites for several reasons — dying, grabbing a powerup, a Yoshi
+# hatching out of a block — so a lock appearing is not proof of a death. The
+# player's own animation trigger is, and the two are consulted together: when
+# the lock appears, this byte is watched briefly for the dying animation.
+#
+# It is not simply used on its own, because it is far too brief to catch by
+# polling — that was tried first and lost most deaths. Watched only in the
+# moment a lock appears, which is rare, it costs nothing and settles the
+# question the lock byte cannot.
+CONFIRM_ADDR = 0xF50071
+CONFIRM_VALUE = 0x09
+CONFIRM_MS = 250
+
+# How many sprite locks may be rejected in a row, with no death in between,
+# before the animation check is abandoned for that hack. A player hitting that
+# many Yoshi blocks without dying is less likely than the trigger being missed,
+# and silently losing every death is far worse than counting a few extra.
+GIVE_UP_AFTER = 8
+
+# Kevin's Retry System — the retry patch most modern kaizo hacks use — keeps a
+# death total at a documented offset from its free-RAM base, five bytes holding
+# one decimal digit each. Five bytes all in 0-9 is a fingerprint: arbitrary
+# memory manages it about once in ten million. Probed and logged only, because
+# a hack can move the base and this is not yet something to count deaths from.
+RETRY_DEATHS = 0xF6B43B
+RETRY_DEATH_DIGITS = 5
+
 # Emulator devices are named after the transport rather than the emulator:
 # BizHawk and snes9x-rr both appear as luabridge://host:port. Map what people
 # actually type.
@@ -263,6 +310,8 @@ class SnesTracker(object):
             "deaths": None,
             "mode": None,
             "armed": False,
+            "level": None,
+            "level_deaths": None,
         }
         self._run = False
         self._thread = None
@@ -290,6 +339,18 @@ class SnesTracker(object):
         self._samples = 0
         self._highs = 0
         self._high_since = None
+        # The level a death gets credited to. Latched on entry rather than read
+        # when the death happens: a death that sends you back to the overworld
+        # changes the level number before the watcher reports it, and crediting
+        # it to wherever the game went next is how per-level counts drift.
+        self._level = None
+        self._retry_probe_due = False
+        # Whether this hack's deaths have been seen to move the animation
+        # trigger. Until one has, a sprite lock is taken at face value, so a
+        # hack whose trigger never fires keeps working exactly as before.
+        self._confirm_learned = False
+        self._ignored = 0
+        self._in_a_row = 0
         # Region reads for the address finder, serviced by the poll loop.
         # Deliberately not a connection of its own: a second client attached
         # to the same device is how this app once broke itself, and the pak
@@ -393,6 +454,76 @@ class SnesTracker(object):
             self._entry(rom)["deaths"] = 0
             self._save_cache()
         self.on_change()
+
+    # -- per-level counts -------------------------------------------------
+
+    def _levels(self, rom):
+        """The per-level death counts for one hack.
+
+        Kept beside the hack total rather than derived from it. The total is
+        the number people have been watching all along and can nudge by hand,
+        and per-level counts only start existing once this feature does — so
+        summing them would show nothing for a hack you have already played.
+        """
+        entry = self._entry(rom)
+        table = entry.get("levels")
+        if not isinstance(table, dict):
+            table = {}
+            entry["levels"] = table
+        return table
+
+    def level_deaths(self, rom=None, level=None):
+        """Deaths on one level, or on the level being played."""
+        with self._lock:
+            rom = rom or self.state["rom"]
+            level = level if level is not None else self.state["level"]
+        if not rom or level is None:
+            return None
+        return self._levels(rom).get(level, 0)
+
+    def level_table(self, rom=None):
+        """Every level this hack has deaths against, worst first."""
+        with self._lock:
+            rom = rom or self.state["rom"]
+        if not rom:
+            return []
+        table = self._levels(rom)
+        rows = [{"level": key, "deaths": value} for key, value in table.items()]
+        rows.sort(key=lambda row: (-row["deaths"], row["level"]))
+        return rows
+
+    def adjust_level_deaths(self, delta):
+        with self._lock:
+            rom, level = self.state["rom"], self.state["level"]
+        if not rom or level is None:
+            return None
+        table = self._levels(rom)
+        table[level] = max(0, table.get(level, 0) + delta)
+        self._save_cache()
+        self._set(level_deaths=table[level])
+        self.on_change()
+        return table[level]
+
+    def reset_level_deaths(self):
+        """Zero the current level only, leaving the hack total alone."""
+        with self._lock:
+            rom, level = self.state["rom"], self.state["level"]
+        if not rom or level is None:
+            return False
+        self._levels(rom)[level] = 0
+        self._save_cache()
+        self._set(level_deaths=0)
+        self.on_change()
+        return True
+
+    def _enter_level(self, raw):
+        """Latch the level now being played and show its count."""
+        level = "%02X" % raw
+        self._level = level
+        with self._lock:
+            rom = self.state["rom"]
+        count = self._levels(rom).get(level, 0) if rom else None
+        self._set(level=level, level_deaths=count)
 
     # -- lifecycle --------------------------------------------------------
 
@@ -551,6 +682,8 @@ class SnesTracker(object):
             rom_now = self.state["rom"]
         death_addr, death_mode, death_value = self.death_settings(rom_now)
         rom_addr = int(cfg["rom_addr"], 16) if cfg["rom_addr"].strip() else None
+        level_addr = (int(cfg["level_addr"], 16)
+                      if (cfg.get("level_addr") or "").strip() else None)
         interval = max(cfg["poll_ms"], 50) / 1000.0
         dwell = cfg["arm_after_s"]
         disarm_below = min([gate_min] + sorted(arm_modes)) if arm_modes else gate_min
@@ -581,6 +714,8 @@ class SnesTracker(object):
             # hack whose death state lasts 25ms, that gap loses deaths.
             return [gate_addr, exit_addr] if with_exits else [gate_addr]
         cycle = 0
+        prev_mode = None
+        level_pending = False
 
         while self._active(generation):
             now = time.time()
@@ -611,10 +746,20 @@ class SnesTracker(object):
                     # This hack may detect deaths differently from the last.
                     death_addr, death_mode, death_value = self.death_settings(rom_id)
                     cycle = 0
+                    # A level number means nothing across hacks, so the latch
+                    # is dropped and re-read rather than carried over.
+                    self._level = None
+                    prev_mode = None
+                    self._retry_probe_due = True
                     entry = self._entry(rom_id)
+                    # What was learned about this hack last time, so the Yoshi
+                    # filter is armed from the first death rather than after it.
+                    self._confirm_learned = bool(entry.get("death_confirm"))
+                    self._ignored = self._in_a_row = 0
                     self._set(rom=rom_id,
                               exits=entry.get("exits"),
-                              deaths=entry.get("deaths", 0))
+                              deaths=entry.get("deaths", 0),
+                              level=None, level_deaths=None)
                     self.log("hack: %s (deaths %s)" % (rom_id, entry.get("deaths", 0)))
                     try:
                         self.on_rom_change(rom_id)
@@ -638,6 +783,9 @@ class SnesTracker(object):
             if mode < disarm_below or mode > gate_max:
                 armed = self._armed = False
                 self._valid_since = None
+                # Whatever level was being played is over, and the mode will
+                # cross back in from below, so the next entry re-reads it.
+                prev_mode = None
                 self._set(status="no file loaded", mode=mode, armed=False)
                 time.sleep(interval)
                 continue
@@ -667,6 +815,29 @@ class SnesTracker(object):
                 continue
 
             self._set(status="reading", mode=mode, armed=True)
+
+            # The level number can only change on a level load, and a level
+            # load is exactly the game mode crossing into the in-level range —
+            # so that crossing is the only time it costs a read. The slow cycle
+            # picks it up too, which covers starting the app mid-level.
+            # Both tests require actually being in a level. On the overworld the
+            # translevel byte still holds the last level entered, so reading it
+            # there would have the dashboard name a level you are not playing —
+            # and credit the next death to it if one somehow arrived.
+            if level_addr is not None and mode >= IN_LEVEL_MODE:
+                if prev_mode is None or prev_mode < IN_LEVEL_MODE \
+                        or (check_exits and self._level is None):
+                    level_pending = True
+                # Wait for settled play before reading, so the level number is
+                # the one being loaded rather than whatever was there mid-load.
+                if level_pending and mode >= SETTLED_MODE:
+                    level_pending = False
+                    self._enter_level(snes.read_u8(level_addr))
+            prev_mode = mode
+
+            if self._retry_probe_due:
+                self._retry_probe_due = False
+                self._probe_retry(snes)
 
             if not check_exits:
                 wait(snes, death_addr, death_mode, death_value, generation)
@@ -701,35 +872,131 @@ class SnesTracker(object):
 
             wait(snes, death_addr, death_mode, death_value, generation)
 
-    def _note_death_byte(self, raw, mode, value):
-        """One sample of the death byte, in whichever way this hack reports."""
+    def _note_counter(self, raw):
+        """One sample of a total the hack keeps itself."""
         self._samples += 1
-        if mode == "counter":
-            # A total the hack keeps cannot be missed by polling at all:
-            # whatever happened between two reads is still in the number.
-            if self._last_count is not None:
-                # Forward distance, so a counter rolling past 255 is still a
-                # small step. A reset lands far away and is rejected by the
-                # cap rather than adding hundreds.
-                step = (raw - self._last_count) & 0xFF
-                if 0 < step <= 32:
-                    self._add_deaths(step)
-            self._last_count = raw
-        elif value is not None:
-            dying = raw == value
-            if dying:
-                self._highs += 1
-                if not self._death_high:
-                    self._add_deaths(1)
-                    self._high_since = time.time()
-                elif self._high_since and time.time() - self._high_since > 3.0:
-                    # Held for longer than any death animation: the edge can
-                    # never fall, so nothing after this would ever count. Say
-                    # so rather than silently stopping.
-                    self._high_since = None
-                    self.log("death byte stuck at 0x%02X — deaths after this "
-                             "will not count. Wrong value for this hack?" % raw)
-            self._death_high = dying
+        # Such a total cannot be missed by polling at all: whatever happened
+        # between two reads is still in the number.
+        if self._last_count is not None:
+            # Forward distance, so a counter rolling past 255 is still a small
+            # step. A reset lands far away and is rejected by the cap rather
+            # than adding hundreds.
+            step = (raw - self._last_count) & 0xFF
+            if 0 < step <= 32:
+                self._add_deaths(step)
+        self._last_count = raw
+
+    def _note_held(self, raw):
+        """The lock byte has been set a long time. Usually that is a prompt."""
+        if self._high_since and time.time() - self._high_since > HELD_WARN_S:
+            self._high_since = None
+            self.log("death byte has read 0x%02X for %d seconds. That is "
+                     "normal while a retry prompt or a pause is waiting on "
+                     "you — counting carries on as soon as it clears. It only "
+                     "means the wrong value if it never clears while you are "
+                     "playing." % (raw, HELD_WARN_S))
+
+    def _confirm_death(self, snes, addr, value, generation):
+        """A sprite lock just appeared. Is the player actually dying?
+
+        Watches the player's animation trigger for a moment, while carrying on
+        watching the lock byte so its fall is not missed. Returns whether the
+        dying animation was seen, and whether the lock has already cleared.
+
+        Two reads per sample instead of one, but only while resolving a lock
+        that just appeared — a few times an hour, not fifty times a second.
+        """
+        seen, cleared = False, False
+        end = time.time() + CONFIRM_MS / 1000.0
+        while self._active(generation) and time.time() < end:
+            if snes.read_u8(CONFIRM_ADDR) == CONFIRM_VALUE:
+                seen = True
+                break
+            # The lock clearing does not end the window. On a hack that clears
+            # it in two frames the animation can still be a moment behind, and
+            # giving up here would throw away a real death on exactly the
+            # quick-retry hacks this whole watcher exists for.
+            if not cleared:
+                self._samples += 1
+                if snes.read_u8(addr) == value:
+                    self._highs += 1
+                else:
+                    cleared = True
+            time.sleep(DEATH_WATCH_MS / 1000.0)
+        return seen, cleared
+
+    def _note_state(self, snes, raw, addr, value, generation):
+        """One sample of a byte that means the player is dying."""
+        self._samples += 1
+        dying = raw == value
+        if not dying:
+            self._death_high = False
+            return
+        self._highs += 1
+        if self._death_high:
+            self._note_held(raw)
+            return
+
+        # A lock has just appeared. $9D is set by anything that freezes the
+        # scene, so this may be a death or may be a Yoshi hatching out of a
+        # block, which looks identical in that byte alone.
+        self._death_high = True
+        self._high_since = time.time()
+        seen, cleared = self._confirm_death(snes, addr, value, generation)
+        if cleared:
+            self._death_high = False
+        if seen:
+            if not self._confirm_learned:
+                # This hack's deaths do move the animation trigger, so from
+                # here on a lock that doesn't is something else. Remembered
+                # against the hack, so it is known from the start next time.
+                self._learn_confirm()
+            self._in_a_row = 0
+            self._add_deaths(1)
+        elif self._confirm_learned:
+            self._ignored += 1
+            self._in_a_row += 1
+            if self._in_a_row >= GIVE_UP_AFTER:
+                # Every lock in a row rejected and no death in between. More
+                # likely the trigger is being missed on this hack than that
+                # the player hit that many Yoshi blocks without dying, and
+                # losing deaths silently is far worse than counting a few
+                # extra. Back to taking locks at face value.
+                self._forget_confirm()
+                self._add_deaths(1)
+                return
+            self.log("ignored a sprite lock that wasn't a death (%d so far on "
+                     "this hack). Yoshi hatching out of a block does this."
+                     % self._ignored)
+        else:
+            # Nothing has yet shown that this hack's deaths move the animation
+            # trigger, so there is nothing to disbelieve this lock with.
+            # Counting it is what this did before, and a hack where the
+            # trigger never fires has to keep working.
+            self._add_deaths(1)
+
+    def _forget_confirm(self):
+        """Stop trusting the animation trigger on this hack."""
+        self._confirm_learned = False
+        self._in_a_row = 0
+        with self._lock:
+            rom = self.state["rom"]
+        if rom:
+            self._entry(rom).pop("death_confirm", None)
+            self._save_cache()
+        self.log("%d sprite locks in a row with no dying animation, so the "
+                 "animation check is being dropped for this hack — counting "
+                 "every lock again, the way it worked before." % GIVE_UP_AFTER)
+
+    def _learn_confirm(self):
+        self._confirm_learned = True
+        with self._lock:
+            rom = self.state["rom"]
+        if rom:
+            self._entry(rom)["death_confirm"] = True
+            self._save_cache()
+        self.log("deaths on this hack move the animation trigger, so a sprite "
+                 "lock on its own will no longer be counted as one")
 
     def _watch_deaths(self, snes, addr, mode, value, seconds, generation):
         """Sample the death byte repeatedly instead of idling between cycles.
@@ -739,23 +1006,64 @@ class SnesTracker(object):
         """
         end = time.time() + seconds
         while self._active(generation):
-            self._note_death_byte(snes.read_u8(addr), mode, value)
+            raw = snes.read_u8(addr)
+            if mode == "counter":
+                self._note_counter(raw)
+            elif value is not None:
+                self._note_state(snes, raw, addr, value, generation)
             remaining = end - time.time()
             if remaining <= 0:
                 return
             time.sleep(min(DEATH_WATCH_MS / 1000.0, remaining))
 
     def _add_deaths(self, count):
+        level = self._level
         with self._lock:
             self.state["deaths"] = (self.state["deaths"] or 0) + count
             total, rom = self.state["deaths"], self.state["rom"]
+        here = None
         if rom:
-            self._entry(rom)["deaths"] = total
+            entry = self._entry(rom)
+            entry["deaths"] = total
+            if level is not None:
+                table = self._levels(rom)
+                here = table[level] = table.get(level, 0) + count
             self._save_cache()
-        self.log("deaths = %d  (%d of %d samples saw it)"
-                 % (total, self._highs, self._samples))
+        if here is None:
+            self.log("deaths = %d  (%d of %d samples saw it)"
+                     % (total, self._highs, self._samples))
+        else:
+            self._set(level_deaths=here)
+            self.log("deaths = %d, level %s = %d  (%d of %d samples saw it)"
+                     % (total, level, here, self._highs, self._samples))
         self._highs = self._samples = 0
         self.on_change()
+
+    def _probe_retry(self, snes):
+        """Log the Retry System's own death total if this hack keeps one.
+
+        Kevin's Retry System is what most modern kaizo hacks use for the
+        prompt, and it keeps a death total of its own at a documented address —
+        five bytes, one decimal digit each. A total cannot be missed the way a
+        death animation lasting 23ms can, so if it is there it is strictly
+        better than anything the finder turns up by watching for an edge.
+
+        This only reports it. A hack can relocate the patch's free RAM, and
+        reading digits when the base has moved would count nonsense, so
+        switching to it is a decision for after it has been seen to be right.
+        """
+        try:
+            addrs = [RETRY_DEATHS + i for i in range(RETRY_DEATH_DIGITS)]
+            digits = snes.read_map(addrs)
+        except Exception:
+            return
+        values = [digits[addr] for addr in addrs]
+        if any(value > 9 for value in values):
+            return
+        self.log("Retry System death counter found at %06X: %d deaths on this "
+                 "save. Exact, and cannot be missed by polling — tell the "
+                 "developer if your deaths disagree with it."
+                 % (RETRY_DEATHS, int("".join(str(v) for v in values))))
 
     def _store_exits(self, value):
         with self._lock:

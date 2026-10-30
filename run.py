@@ -75,6 +75,12 @@ def main():
         "deaths_plus": lambda body: app.snes.adjust_deaths(1),
         "deaths_minus": lambda body: app.snes.adjust_deaths(-1),
         "deaths_reset": lambda body: app.snes.reset_deaths(),
+        # The level buttons touch only the level being played. Nudging the
+        # hack total for a death you earned on purpose shouldn't also blame
+        # whichever level you were standing in at the time.
+        "level_plus": lambda body: app.snes.adjust_level_deaths(1),
+        "level_minus": lambda body: app.snes.adjust_level_deaths(-1),
+        "level_reset": lambda body: app.snes.reset_level_deaths(),
         "exits_set": lambda body: app.set_manual_exits(body.get("value", 0)),
         "test_alert": lambda body: alerts.push({
             "title": "Test Alert",
